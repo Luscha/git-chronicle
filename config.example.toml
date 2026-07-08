@@ -1,0 +1,63 @@
+# gitchronicle configuration — copy this to `config.toml` and edit.
+#   cp config.example.toml config.toml
+# `config.toml` is git-ignored (it holds your local paths); this template is committed.
+# CLI flags (--repo, --rev, --db, --out) override anything here. Algorithm params not shown
+# have sensible generic defaults (see src/gitchronicle/config.py DEFAULTS) — no per-repo tuning.
+
+[repo]
+path = "/path/to/your/repo"
+# Analyse the DEFAULT BRANCH's full history: every commit reachable from its tip — which INCLUDES
+# all merged-PR commits (they became ancestors when merged), while never-merged feature branches
+# are naturally excluded. Merge commits are skipped in untangle (their content is the individual
+# commits they merge). Anchor at the default branch, not the ambient checkout.
+rev_range = "origin/master"   # e.g. "origin/main", or a range like "v1.0..origin/master"
+
+[db]
+path = "build/gitchronicle.db"
+
+[catalog]
+# How domains are formed from concerns:
+#   "semantic" = the LLM reconstructs functional features (growing-list assignment + de-vague pass +
+#                specificity rule); domains and areas come out already named. (Recommended.)
+#   "leiden"   = embedding clustering of concern labels (legacy, no naming).
+method = "semantic"
+assign_batch = 40
+
+[untangle]
+workers = 6   # concurrent LLM calls; lower this if your provider rate-limits (HTTP 429)
+
+[output]
+html = "build/graph.html"    # interactive knowledge-base browser (self-contained HTML)
+json = "build/domains.json"  # machine-readable export to build your own site on top of
+
+# --- providers (any OpenAI-compatible endpoint; secrets read from .env via env: prefix) ---
+# The chat model does per-commit untangle + naming: the dominant cost (O(commits)). Model choice
+# matters — a <=3B model is too weak; 7B is the usable floor; 14-32B is the sweet spot. Use a cloud
+# API (below) or a local 14B+ on a GPU. See the README "Choosing a model & provider".
+[providers.chat]
+kind = "openai"
+base_url = "https://api.scaleway.ai/v1"     # any OpenAI-compatible base URL
+model = "qwen3-coder-30b-a3b-instruct"
+api_key = "env:YOUR_API_KEY"                # reads $YOUR_API_KEY from the environment / .env
+temperature = 0.0   # deterministic decoding
+seed = 7            # reproducible sampling
+timeout = 120
+
+# "Big model" role: dependency judgment, near-duplicate merge, `ask` — few, simple calls.
+[providers.chat_large]
+kind = "openai"
+base_url = "https://api.scaleway.ai/v1"
+model = "llama-3.3-70b-instruct"
+api_key = "env:YOUR_API_KEY"
+temperature = 0.0
+seed = 7
+timeout = 180
+
+# Embeddings (semantic search index). Local + multilingual by default (Ollama).
+[providers.embed]
+kind = "ollama"
+base_url = "http://localhost:11434/v1"
+model = "bge-m3"
+api_key = "ollama"
+batch = 16
+timeout = 900

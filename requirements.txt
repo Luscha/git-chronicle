@@ -1,0 +1,8 @@
+# Runtime dependencies. Vanilla install:
+#   python -m venv .venv
+#   . .venv/bin/activate
+#   pip install -r requirements.txt
+httpx>=0.28.1
+igraph>=1.0.0
+numpy>=2.0
+typer>=0.26.8

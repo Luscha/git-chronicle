@@ -1,0 +1,23 @@
+# Byte-compiled / packaging
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+
+# Secrets and machine-specific config — copy config.example.toml -> config.toml
+.env
+config.toml
+
+# Runtime artifacts (databases + exported graphs/JSON). Default output goes to build/.
+*.db
+*.db-shm
+*.db-wal
+graph.html
+domains.json
+features.json
