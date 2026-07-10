@@ -82,6 +82,9 @@ _VENDORED_SEGMENTS = {
     "node_modules", "vendor", "vendored", "third_party", "thirdparty", "dist", "build",
     "target", "out", "__pycache__", "generated", "coverage", ".venv", "venv", ".git",
     "locale", "locales", "po", "i18n", "translations",
+    # native-extension vendor trees (a bundled Boost defeats extension-profile detection —
+    # hpp/cpp match the repo); the conventional root names are industry-generic
+    "extern", "externals", "external", "extern-server", "extern-client", "deps",
 }
 _VENDORED_SUFFIX = (".min.js", ".min.css", ".lock", ".map", "_pb2.py", ".pb.go")
 
