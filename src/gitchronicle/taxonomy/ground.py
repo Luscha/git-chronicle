@@ -435,8 +435,14 @@ def inject_new_import_entities(conn, log=print) -> int:
     god = {r["stem"] for r in conn.execute("SELECT stem FROM stem_census WHERE is_god=1")}
     have_names = {r["name"].lower() for r in conn.execute("SELECT name FROM glossary")}
     territories = []
+    claimed_all: set = set()
     for r in conn.execute("SELECT stems FROM glossary"):
-        territories.append(_norm_stems(set(json.loads(r["stems"] or "[]"))))
+        t = _norm_stems(set(json.loads(r["stems"] or "[]")))
+        territories.append(t)
+        claimed_all |= t
+    for r in conn.execute("SELECT stems FROM domains "
+                          "WHERE status IN ('named','provisional','confirmed')"):
+        claimed_all |= _norm_stems(set(json.loads(r["stems"] or "[]")))
     n = 0
     for r in conn.execute("SELECT label, summary, files FROM concerns WHERE origin='import'"):
         name = r["label"].strip()[:60]
@@ -447,9 +453,14 @@ def inject_new_import_entities(conn, log=print) -> int:
             stems |= path_stems(f)
         stems -= god
         nest = _norm_stems(stems)
-        small_claimed = any(nest and len(nest & t) * 2 >= (min(len(nest), len(t)) or 1)
-                            for t in territories)
-        if small_claimed:
+        if not nest:
+            continue
+        # a re-imported system is not a new one: skip when the family's vocabulary is
+        # majority-claimed ANYWHERE (a re-init re-imports the whole repo — measured: 1,424
+        # duplicate injections under the per-entity rule), or half-claimed by one entity
+        if len(nest & claimed_all) * 2 >= len(nest):
+            continue
+        if any(len(nest & t) * 2 >= (min(len(nest), len(t)) or 1) for t in territories):
             continue
         conn.execute(
             "INSERT INTO glossary (name, definition, stems, evidence, source, tier, status) "
