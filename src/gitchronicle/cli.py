@@ -250,6 +250,67 @@ def run(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db
         raise typer.Exit(2)   # terraform-style: 0 = clean, 2 = changes awaiting review
 
 
+@app.command(name="init")
+def init_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+             yes: bool = typer.Option(False, "--yes",
+                 help="Accept both drafts without review stops (automation)"),
+             scope_arg: Optional[str] = typer.Option(None, "--scope",
+                 help="Path to a pre-reviewed gitchronicle.md"),
+             charter_arg: Optional[str] = typer.Option(None, "--charter",
+                 help="Charter text, or @path to a file containing it")):
+    """Bootstrap the analysis: draft the SCOPE map (what is the product), stop for review,
+    then the CHARTER (owner taste), stop for review. Never runs the pipeline, never spends
+    on LLM calls. Re-run after each review to advance; --yes accepts everything."""
+    import re as _re
+    from .scope import MD_FILE, Scope, draft_charter, draft_scope, load_charter
+    cfg, conn = _setup(config, repo, rev, db)
+    repo_path = cfg["repo"]["path"]
+    md = Path(MD_FILE)
+
+    if scope_arg:
+        src = Path(scope_arg)
+        if src.exists() and src.resolve() != md.resolve():
+            md.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            console.print(f"scope taken from {scope_arg}")
+    if not Scope.load(md).exists():
+        _head("Init · scope draft")
+        draft_scope(repo_path, md)
+        console.print(f"drafted [bold]{md}[/] ## Scope "
+                      f"({len(Scope.load(md).excludes)} suggested exclusions, evidence in "
+                      f"comments)")
+        if not yes:
+            console.print("review the Scope section (flip any wrong verdict), then re-run "
+                          "[bold]gitchronicle init[/]")
+            raise typer.Exit()
+
+    if charter_arg:
+        text = (Path(charter_arg[1:]).read_text(encoding="utf-8")
+                if charter_arg.startswith("@") else charter_arg)
+        body = md.read_text(encoding="utf-8") if md.exists() else "# gitchronicle\n\n"
+        section = "## Charter\n\n" + text.strip() + "\n"
+        if "## Charter" in body:
+            body = _re.sub(r"## Charter.*?(?=\n## |\Z)", section, body, flags=_re.S)
+        else:
+            body = body.rstrip() + "\n\n" + section
+        md.write_text(body, encoding="utf-8")
+        console.print("charter written")
+    if not load_charter(md):
+        _head("Init · charter draft")
+        if conn.execute("SELECT COUNT(*) FROM commits").fetchone()[0] == 0:
+            console.print("  scanning history (local, no LLM) ...")
+            ingest(conn, repo_path, cfg["repo"]["rev_range"], log=_log)
+        from .taxonomy.ground import build_census
+        build_census(conn, scope=Scope.load(md))
+        draft_charter(conn, md)
+        console.print(f"drafted [bold]{md}[/] ## Charter (census-seeded questions inside)")
+        if not yes:
+            console.print("fill the Charter section (or leave it minimal), then run "
+                          "[bold]gitchronicle run[/]")
+            raise typer.Exit()
+    console.print("[green]init complete[/] — scope + charter in place. "
+                  "Next: [bold]gitchronicle run[/]")
+
+
 @app.command()
 def ground(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
            force: bool = typer.Option(False, "--force", help="Rebuild census + glossary")):

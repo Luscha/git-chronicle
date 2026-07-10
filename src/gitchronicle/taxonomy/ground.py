@@ -25,6 +25,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..extract.git_ingest import run_git
+from ..scope import load_charter
 
 # generic path words that can never evidence a feature by themselves (kept as unigram
 # stopwords only — they still appear inside bigrams like "guild war")
@@ -62,13 +63,23 @@ def path_stems(path: str) -> set[str]:
     return stems
 
 
-def build_census(conn, top_n: int = 800, min_concerns: int = 3) -> int:
-    """Stem census over every path the history touched, weighted by concern activity."""
+def build_census(conn, top_n: int = 800, min_concerns: int = 3, scope=None) -> int:
+    """Stem census over every path the history touched, weighted by concern activity
+    (falls back to touch counts pre-untangle, so `init` can seed the charter). Scope-
+    filtered: out-of-scope vocabulary must never enter the evidence layer."""
+    if scope is None:
+        from ..scope import scope_or_default
+        scope = scope_or_default()
     file_concerns: dict[str, int] = Counter()
     for r in conn.execute("SELECT files FROM concerns"):
         for f in json.loads(r["files"] or "[]"):
             file_concerns[f] += 1
-    all_files = {r["path"] for r in conn.execute("SELECT DISTINCT path FROM commit_files")}
+    if not file_concerns:   # pre-untangle (init): weight by touch counts instead
+        for r in conn.execute("SELECT path, COUNT(*) n FROM commit_files GROUP BY path"):
+            if scope(r["path"]):
+                file_concerns[r["path"]] = r["n"]
+    all_files = {r["path"] for r in conn.execute("SELECT DISTINCT path FROM commit_files")
+                 if scope(r["path"])}
 
     stem_files: dict[str, set] = defaultdict(set)
     stem_concerns: dict[str, int] = Counter()
@@ -246,6 +257,8 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
     # Two SEPARATE evidence passes. Mixing them fails in a measured way: rich doc prose
     # dominates attention and every census chunk returns only the doc entities, mining
     # zero from the stems. Docs are mined once; census chunks are mined alone.
+    _c = load_charter()
+    charter = ("OWNER CHARTER (project knowledge - follow where relevant):\n" + _c + "\n\n") if _c else ""
     drafts = []
 
     def _collect(out, tier):
@@ -257,7 +270,7 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
     for i in range(0, len(rich), 12):
         block = "\n\n".join(f"### {d['path']}\n{d['excerpt'][:900]}" for d in rich[i:i + 12])
         try:
-            _collect(provider.chat(GLOSSARY_SYS, f"KEY DOC EXCERPTS:\n{block}",
+            _collect(provider.chat(GLOSSARY_SYS, charter + f"KEY DOC EXCERPTS:\n{block}",
                                    want_json=True, large=True, cache_extra=f"glossary-docs:{i}"),
                      tier=4)
         except Exception:  # noqa: BLE001
@@ -280,7 +293,7 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
 
     for i in range(0, len(census), chunk):
         part = census[i:i + chunk]
-        user = (f"STEM CENSUS (chunk {i // chunk + 1}) — mine the FEATURES this vocabulary "
+        user = (charter + f"STEM CENSUS (chunk {i // chunk + 1}) — mine the FEATURES this vocabulary "
                 f"evidences; the 'changes' and 'symbols' lines are the semantic evidence:\n"
                 + "\n".join(_row(r) for r in part))
         try:
@@ -374,7 +387,7 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
             f"{j}: {d['name']} — {str(d.get('definition') or '')[:90]} "
             f"|stems: {', '.join((d.get('stems') or [])[:5])}" for j, d in enumerate(part))
         try:
-            out = provider.chat(GLOSSARY_MERGE_SYS, listing, want_json=True, large=True,
+            out = provider.chat(GLOSSARY_MERGE_SYS, charter + listing, want_json=True, large=True,
                                 cache_extra=f"glossary-merge:{i}:{len(part)}")
             ents = [e for e in (out.get("entities") or []) if isinstance(e, dict)
                     and (e.get("name") or "").strip()] if isinstance(out, dict) else []

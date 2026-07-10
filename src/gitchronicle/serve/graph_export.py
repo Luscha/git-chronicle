@@ -85,24 +85,16 @@ def _build_payload(conn) -> dict:
                           "date": (r["authored_at"] or "")[:10],
                           "author": r["author_name"] or "", "kind": r["kind"] or ""}
 
-    # --- areas (top level) ---
-    dom_by_area = defaultdict(list)
+    # --- no inferred areas (concept removed): one flat bucket keeps the browser working ---
     for dd in domains:
-        dom_by_area[dd["area_id"]].append(dd)
-    areas = []
-    for a in conn.execute(
-        "SELECT id, name, slug, classification, tags FROM areas WHERE status='named'"):
-        ads = dom_by_area.get(a["id"], [])
-        firsts = [x["first_seen"] for x in ads if x["first_seen"]]
-        lasts = [x["last_seen"] for x in ads if x["last_seen"]]
-        areas.append({
-            "id": a["id"], "name": a["name"] or a["slug"] or f"area {a['id']}",
-            "classification": a["classification"] or "", "tags": json.loads(a["tags"]) if a["tags"] else [],
-            "n_domains": len(ads), "n_commits": sum(x["n_commits"] for x in ads),
-            "n_concerns": sum(len(x["concerns"]) for x in ads),
-            "first_seen": min(firsts) if firsts else "", "last_seen": max(lasts) if lasts else "",
-        })
-    areas.sort(key=lambda a: -a["n_commits"])
+        dd["area_id"] = 0
+    firsts = [x["first_seen"] for x in domains if x["first_seen"]]
+    lasts = [x["last_seen"] for x in domains if x["last_seen"]]
+    areas = [{"id": 0, "name": "Features", "classification": "", "tags": [],
+              "n_domains": len(domains), "n_commits": sum(x["n_commits"] for x in domains),
+              "n_concerns": sum(len(x["concerns"]) for x in domains),
+              "first_seen": min(firsts) if firsts else "",
+              "last_seen": max(lasts) if lasts else ""}]
 
     return {
         "meta": {

@@ -172,6 +172,58 @@ class Scope:
         return bool(self.excludes) or self.includes != ["**"]
 
 
+def scope_or_default(md_path: str | Path = MD_FILE, log=None):
+    """The runtime path filter: the reviewed scope map when present, else the legacy
+    draft-advisor heuristics with a loud pointer to `gitchronicle init`."""
+    s = Scope.load(md_path)
+    if s.exists():
+        return s
+    from .enrich.signals import is_vendored
+    if log:
+        log("  no reviewed scope map — falling back to built-in heuristics "
+            "(run `gitchronicle init` to draft and review one)")
+    return lambda path: not is_vendored(path)
+
+
+CHARTER_HEADER = """## Charter
+
+<!-- Owner knowledge the repository cannot express — plain sentences, consumed ONLY by
+     the feature-naming stages (never per-commit analysis, never assignment picks).
+     Statements that work:
+       - "<X> and <Y> are one feature"
+       - "<X> and <Y> are distinct features, never merge them"
+       - "UI windows/screens belong to the feature they serve"
+       - one or two lines describing what this project IS -->
+
+(describe the project here)
+"""
+
+
+def draft_charter(conn, md_path: str | Path = MD_FILE) -> str:
+    """Charter skeleton seeded from the census (generic — no docs, no repo assumptions):
+    related vocabulary groups are surfaced as commented questions the owner can turn into
+    rulings. Requires a census (init builds a touch-weighted one pre-untangle)."""
+    groups: dict[str, list[str]] = defaultdict(list)
+    for r in conn.execute("SELECT stem, n_concerns FROM stem_census WHERE is_god=0 "
+                          "ORDER BY n_concerns DESC LIMIT 400"):
+        groups[r["stem"].split()[0]].append(r["stem"])
+    questions = [(tok, v) for tok, v in groups.items() if len(v) >= 3][:15]
+    section = CHARTER_HEADER
+    if questions:
+        section += ("\n<!-- the census found related vocabulary that may need a ruling —\n"
+                    "     one sentence each turns a guess into a rule: -->\n")
+        for tok, variants in questions:
+            section += f"<!-- {tok}: {', '.join(variants[:5])} -->\n"
+    p = Path(md_path)
+    text = p.read_text(encoding="utf-8") if p.exists() else "# gitchronicle\n\n"
+    if "## Charter" in text:
+        text = re.sub(r"## Charter.*?(?=\n## |\Z)", section, text, flags=re.S)
+    else:
+        text = text.rstrip() + "\n\n" + section
+    p.write_text(text, encoding="utf-8")
+    return section
+
+
 def load_charter(md_path: str | Path = MD_FILE) -> str:
     """The ## Charter section body (owner taste, injected at label-space calls only)."""
     p = Path(md_path)
@@ -180,4 +232,6 @@ def load_charter(md_path: str | Path = MD_FILE) -> str:
     m = re.search(r"## Charter\s*\n(.*?)(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
     body = (m.group(1) if m else "").strip()
     body = re.sub(r"<!--.*?-->", "", body, flags=re.S).strip()
+    if body == "(describe the project here)":   # untouched skeleton = no charter
+        return ""
     return body[:2500]

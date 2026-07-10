@@ -28,8 +28,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
+from ..scope import load_charter
 from ..storage import now_iso
 from .induce import _slug, embed_facets, load_facets
+
+
+def _charter_block() -> str:
+    """Owner charter prefix for label-space calls (naming/novelty/propose/rename) —
+    never per-concern classification, never untangle."""
+    c = load_charter()
+    if not c:
+        return ""
+    return "OWNER CHARTER (project knowledge - follow where relevant):\n" + c + "\n\n"
 
 CLASSIFY_SYS = (
     "You classify code changes into a software project's existing FEATURES. The FEATURES "
@@ -54,14 +64,6 @@ PROPOSE_SYS = (
     'Respond with ONE JSON object: {"features":[{"name":"...","definition":"...",'
     '"changes":[<change numbers>]}]}'
 )
-
-AREA_SYS = (
-    "Group these software features into broad, meaningful AREAS — top-level sections of "
-    "the project (roughly 6-16, scale to the feature count). Area names are short and "
-    "specific to this project's themes. Every feature goes in exactly one area. "
-    'Respond with ONE JSON object: {"areas":{"Area Name":["feature name", ...]}}.'
-)
-
 
 NOVELTY_SYS = (
     "A group of code changes in one software project matched NO existing feature, but they "
@@ -344,7 +346,8 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
                 continue
         gloss = glossary_matches(conn, stems)
         gblock = "\n".join(f"- {g['name']} — {g['definition'][:100]}" for g in gloss)
-        user = ("CHANGES:\n" + "\n".join(f"- {_ctx(info[c])}" for c in members[:14])
+        user = (_charter_block()
+                + "CHANGES:\n" + "\n".join(f"- {_ctx(info[c])}" for c in members[:14])
                 + f"\n\nSHARED STEMS: {', '.join(stems)}"
                 + ("\n\nGLOSSARY CANDIDATES:\n" + gblock if gblock else "")
                 + ("\n\nREJECTED names (NEVER use): " + ", ".join(sorted(tomb)) if tomb else ""))
@@ -386,7 +389,7 @@ def _rename_on_accretion(conn, provider, info, log) -> int:
             "GROUP BY d.id HAVING n >= 5 AND n >= 2*d.named_from").fetchall():
         labels = [x["label"] for x in conn.execute(
             "SELECT label FROM concerns WHERE domain_id=? LIMIT 12", (r["id"],))]
-        user = (f"CURRENT NAME: {r['name']}\nSHARED STEMS: "
+        user = (_charter_block() + f"CURRENT NAME: {r['name']}\nSHARED STEMS: "
                 f"{', '.join(json.loads(r['stems'] or '[]')[:8])}\n"
                 "MEMBER CHANGES:\n" + "\n".join(f"- {l}" for l in labels))
         try:
@@ -421,7 +424,7 @@ def _propose_new(conn, provider, cfg, nones, info, existing_names, run_id, log) 
     out_features: list[dict] = []
     for i in range(0, len(nones), batch_n):
         batch = nones[i:i + batch_n]
-        user = ("EXISTING FEATURES (reuse = assign there):\n"
+        user = (_charter_block() + "EXISTING FEATURES (reuse = assign there):\n"
                 + "\n".join(f"- {n}" for n in sorted(existing_names.values()))[:4000]
                 + ("\n\nREJECTED names (NEVER propose):\n" + "\n".join(f"- {t}" for t in tomb)
                    if tomb else "")
@@ -577,59 +580,6 @@ def _post(conn, provider, log) -> None:
     from ..catalog.catalog import _derive_files
     _derive_files(conn)
     conn.commit()
-    _build_areas(conn, provider, log)
-
-
-def _build_areas(conn, provider, log=print) -> int:
-    feats = conn.execute("SELECT id, name, stems FROM domains "
-                         "WHERE status IN ('named','provisional','confirmed') ORDER BY name").fetchall()
-    if not feats:
-        return 0
-    by_name = {f["name"].lower(): f["id"] for f in feats}
-    # ground each feature in its member evidence: top dirs + stems — grouping by NAME
-    # STRINGS alone put 'wiki render target' under Documentation (validated failure).
-    dirs: dict[int, Counter] = {f["id"]: Counter() for f in feats}
-    for r in conn.execute("SELECT domain_id, path FROM domain_files"):
-        if r["domain_id"] in dirs and "/" in r["path"]:
-            dirs[r["domain_id"]][r["path"].rsplit("/", 1)[0].split("/")[0]] += 1
-    lines = []
-    for f in feats:
-        top_dirs = ", ".join(d for d, _ in dirs[f["id"]].most_common(2))
-        stems = ", ".join(json.loads(f["stems"] or "[]")[:4])
-        ev = "; ".join(x for x in (f"dirs: {top_dirs}" if top_dirs else "",
-                                   f"stems: {stems}" if stems else "") if x)
-        lines.append(f"- {f['name']}" + (f"  ({ev})" if ev else ""))
-    out = provider.chat(AREA_SYS + " Group by what the features ARE (use the dirs/stems "
-                        "evidence), never by what their names sound like.",
-                        "Features:\n" + "\n".join(lines),
-                        want_json=True, large=True,
-                        cache_extra=f"tax-areas:{len(feats)}")
-    amap = out.get("areas", {}) if isinstance(out, dict) else {}
-    conn.execute("UPDATE domains SET area_id=NULL")   # release FK refs before dropping areas
-    conn.execute("DELETE FROM areas WHERE status IN ('candidate','named')")
-    n = 0
-    for aname, afeats in amap.items():
-        aid = conn.execute(
-            "INSERT INTO areas (name, slug, status, created_by) VALUES (?,?,'named','auto')",
-            (str(aname)[:80], _slug(str(aname)))).lastrowid
-        n += 1
-        for af in (afeats or []):
-            did = by_name.get(str(af).lower())
-            if did:
-                conn.execute("UPDATE domains SET area_id=? WHERE id=?", (aid, did))
-    orphan = [r[0] for r in conn.execute(
-        "SELECT id FROM domains WHERE area_id IS NULL "
-        "AND status IN ('named','provisional','confirmed')")]
-    if orphan:
-        aid = conn.execute("INSERT INTO areas (name, slug, status) VALUES ('Other','other','named')",
-                           ).lastrowid
-        n += 1
-        conn.executemany("UPDATE domains SET area_id=? WHERE id=?", [(aid, d) for d in orphan])
-    conn.execute("UPDATE areas SET n_domains=(SELECT COUNT(*) FROM domains WHERE area_id=areas.id) "
-                 "WHERE status='named'")
-    conn.commit()
-    log(f"  {n} areas")
-    return n
 
 
 def rollups(conn) -> None:
@@ -639,11 +589,6 @@ def rollups(conn) -> None:
         "n_commits=(SELECT COUNT(DISTINCT commit_hash) FROM commit_domains WHERE domain_id=domains.id), "
         "first_seen=(SELECT MIN(c.authored_at) FROM commit_domains cd JOIN commits c ON c.hash=cd.commit_hash WHERE cd.domain_id=domains.id), "
         "last_seen=(SELECT MAX(c.authored_at) FROM commit_domains cd JOIN commits c ON c.hash=cd.commit_hash WHERE cd.domain_id=domains.id)")
-    conn.execute(
-        "UPDATE areas SET "
-        "n_domains=(SELECT COUNT(*) FROM domains WHERE area_id=areas.id), "
-        "n_commits=(SELECT COUNT(DISTINCT cd.commit_hash) FROM commit_domains cd "
-        "JOIN domains d ON d.id=cd.domain_id WHERE d.area_id=areas.id)")
     conn.commit()
 
 
@@ -663,7 +608,6 @@ def build_taxonomy(conn, provider, cfg: dict, git_head: str | None, rev_range: s
                   frozen=bool(cat.get("frozen")), force=bool(cat.get("reclassify")), log=log)
     n_feat = conn.execute("SELECT COUNT(*) FROM domains "
                           "WHERE status IN ('named','provisional','confirmed')").fetchone()[0]
-    n_areas = conn.execute("SELECT COUNT(*) FROM areas WHERE status='named'").fetchone()[0]
-    log(f"  {n_feat} features in {n_areas} areas")
-    return {"domains": n_feat, "areas": n_areas, **{k: v for k, v in r2.items() if k != "features"},
+    log(f"  {n_feat} features")
+    return {"domains": n_feat, **{k: v for k, v in r2.items() if k != "features"},
             "induced": r1.get("induced", 0)}

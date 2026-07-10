@@ -240,7 +240,10 @@ def induce(conn, provider, cfg: dict, git_head: str | None, rev_range: str,
         c, reps, contrast, size, stems, gloss = job
         gblock = "\n".join(f"- {g['name']} — {g['definition'][:120]} "
                            f"(shared evidence: {', '.join(g['stems'][:4])})" for g in gloss)
-        user = ("CLUSTER CHANGES:\n" + "\n".join(f"- {l}" for l in reps)
+        from ..scope import load_charter as _lc
+        _cb = _lc()
+        _cb = ("OWNER CHARTER (project knowledge - follow where relevant):\n" + _cb + "\n\n") if _cb else ""
+        user = (_cb + "CLUSTER CHANGES:\n" + "\n".join(f"- {l}" for l in reps)
                 + (f"\n\nDOMINANT FILE STEMS: {', '.join(stems)}" if stems else "")
                 + "\n\nGLOSSARY CANDIDATES:\n" + (gblock or "(none)")
                 + "\n\nCONTRAST (samples from OTHER nearby clusters — do NOT cover these):\n"
@@ -273,7 +276,10 @@ def induce(conn, provider, cfg: dict, git_head: str | None, rev_range: str,
                         for i, c in enumerate(order2))
     merged_into: dict[int, int] = {}
     try:
-        out = provider.chat(RECONCILE_SYS, f"TAXONOMY:\n{listing}", want_json=True, large=True,
+        from ..scope import load_charter as _lc2
+        _cb2 = _lc2()
+        _cb2 = ("OWNER CHARTER:\n" + _cb2 + "\n\n") if _cb2 else ""
+        out = provider.chat(RECONCILE_SYS, _cb2 + f"TAXONOMY:\n{listing}", want_json=True, large=True,
                             cache_extra=f"tax-reconcile:{len(order2)}")
     except Exception:  # noqa: BLE001
         out = {}

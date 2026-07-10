@@ -88,7 +88,7 @@ const SRC_COLOR = {fast:'var(--s-fast)', llm:'var(--s-llm)', novelty:'var(--s-no
   propose:'var(--s-propose)', audit:'var(--s-audit)', human:'var(--s-human)'};
 const SRC_ORDER = ['fast','llm','novelty','propose','audit','human'];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const TABS = ['Overview','Ground','Features','Assignments','Coherence','Changeset','Areas','Untangle'];
+const TABS = ['Overview','Ground','Features','Assignments','Coherence','Changeset','Untangle'];
 let tab = 'Overview';
 document.getElementById('meta').textContent =
   `${D.meta.features} features · ${D.meta.concerns} concerns · generated ${D.meta.generated_at}`;
@@ -335,11 +335,6 @@ function vChangeset(){
     <button class="copy" onclick="copyTxt('rename [${c.id}] ${esc(c.name)} -> ', this)">rename</button>
   </div>`).join('');
 }
-function vAreas(){
-  return Object.entries(D.areas).map(([a, fs]) => `<div class="card"><h3>${esc(a)}
-    <span class="mm sm">(${fs.length})</span></h3>
-    ${fs.map(f=>`<span class="chip">${esc(f)}</span>`).join('')}</div>`).join('');
-}
 function vUntangle(){
   return `<div class="card"><h3>Untangle output — newest ${D.untangle.length} commits</h3>
    <div class="filters"><input id="uq" placeholder="search…" oninput="fUnt()"></div>
@@ -361,7 +356,7 @@ function fUnt(){
 }
 
 const VIEWS = {Overview:vOverview, Ground:vGround, Features:vFeatures, Assignments:vAssign,
-  Coherence:vCoherence, Changeset:vChangeset, Areas:vAreas, Untangle:vUntangle};
+  Coherence:vCoherence, Changeset:vChangeset, Untangle:vUntangle};
 function render(){ document.getElementById('main').innerHTML = VIEWS[tab](); }
 document.addEventListener('mousemove', ev => {
   const t = ev.target.closest('[data-tt]');

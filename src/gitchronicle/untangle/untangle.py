@@ -22,7 +22,6 @@ import re
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..enrich.signals import is_vendored
 from ..extract.git_ingest import run_git
 from ..storage import mark_stage
 
@@ -327,7 +326,10 @@ def _infer_msg(provider, repo, h, subject, body, files):
 def untangle(conn, provider, repo: str, log=print, force: bool = False,
              max_diff_lines: int = 180, max_files: int = 40, workers: int = 8,
              max_line_chars: int = 300, max_diff_chars: int = 6000,
-             max_msg_files: int = 4, min_subject_len: int = 20) -> dict:
+             max_msg_files: int = 4, min_subject_len: int = 20, scope=None) -> dict:
+    if scope is None:
+        from ..scope import scope_or_default
+        scope = scope_or_default(log=log)
     caps = {"max_diff_lines": max_diff_lines, "max_line_chars": max_line_chars,
             "max_diff_chars": max_diff_chars}
     kinds = {r["hash"]: r["kind"] for r in conn.execute("SELECT hash, kind FROM commits")}
@@ -349,7 +351,7 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
     rows_by: dict[str, list[dict]] = defaultdict(list)
     for r in conn.execute(
             "SELECT commit_hash, path, insertions, deletions FROM commit_files ORDER BY id"):
-        if not is_vendored(r["path"]):
+        if scope(r["path"]):
             rows_by[r["commit_hash"]].append({"path": r["path"],
                                               "insertions": r["insertions"] or 0,
                                               "deletions": r["deletions"] or 0})
