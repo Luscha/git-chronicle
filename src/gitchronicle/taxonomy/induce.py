@@ -100,14 +100,20 @@ def embed_facets(conn, provider, ids, texts, log=print) -> dict[int, np.ndarray]
     todo = [cid for cid in ids if cid not in have]
     if todo:
         log(f"  embedding {len(todo)} concern facets ...")
-        vecs = provider.embed([texts[cid] for cid in todo])
-        dim = int(vecs.shape[1])
-        for cid, v in zip(todo, vecs):
-            conn.execute(
-                "INSERT OR REPLACE INTO embeddings (target_type,target_id,model,dim,vector) "
-                "VALUES ('facet',?,?,?,?)",
-                (str(cid), model, dim, np.asarray(v, dtype=np.float32).tobytes()))
-        conn.commit()
+        # chunked write-as-you-go: embedding thousands of facets on a local backend can die
+        # mid-way (measured); losing at most one chunk makes the re-run a cheap resume
+        for i in range(0, len(todo), 256):
+            part = todo[i:i + 256]
+            vecs = provider.embed([texts[cid] for cid in part])
+            dim = int(vecs.shape[1])
+            for cid, v in zip(part, vecs):
+                conn.execute(
+                    "INSERT OR REPLACE INTO embeddings (target_type,target_id,model,dim,vector) "
+                    "VALUES ('facet',?,?,?,?)",
+                    (str(cid), model, dim, np.asarray(v, dtype=np.float32).tobytes()))
+            conn.commit()
+            if i and i % 2048 == 0:
+                log(f"    {i}/{len(todo)} facets embedded")
     out = {}
     for r in conn.execute(
             "SELECT target_id, vector FROM embeddings WHERE target_type='facet' AND model=?",
