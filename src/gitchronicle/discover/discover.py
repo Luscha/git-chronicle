@@ -12,7 +12,6 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..extract.git_ingest import run_git
-from ..link.link import coupling_degree
 from ..storage import now_iso
 
 DOM_SYS = (

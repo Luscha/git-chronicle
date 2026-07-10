@@ -108,8 +108,6 @@ DEFAULTS: dict[str, Any] = {
         "max_msg_files": 4, "min_subject_len": 20,
     },
     "lifecycle": {"dormancy_days": 120, "removed_threshold": 0.25, "merged_threshold": 0.5},
-    # Dependencies (auxiliary): co-change + semantic candidate pairs judged by the big LLM.
-    "link": {"max_pairs": 60, "min_cochange": 2, "emb_top_k": 3, "emb_min": 0.6, "core_indeg": 1},
     "index": {},
     "ask": {"k_domains": 8, "k_commits": 10},
 }

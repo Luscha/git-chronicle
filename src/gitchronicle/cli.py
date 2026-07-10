@@ -1,7 +1,7 @@
 """gitchronicle command-line interface (domain-centric).
 
-Pipeline: extract -> signals -> catalog -> attribute -> lifecycle -> discover ->
-link -> graph. Every stage is resumable. Query the result with `domains` / `show`.
+Pipeline: extract -> signals -> untangle -> catalog -> attribute -> lifecycle ->
+index -> graph. Every stage is resumable. Query the result with `domains` / `show`.
 Config from config.toml; --repo/--rev/--db override it.
 """
 
@@ -28,7 +28,6 @@ from .extract import ingest
 from .extract.git_ingest import run_git
 from .index import build_index
 from .lifecycle import lifecycle
-from .link import link
 from .llm import build_provider
 from .query import keyword_commits, keyword_domains, resolve_domain, semantic
 from .serve import export_graph
@@ -181,19 +180,6 @@ app.command(name="discover")(discover_cmd)
 
 
 @app.command()
-def link_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
-             no_llm: bool = typer.Option(False, "--no-llm", help="Skip LLM edge direction")):
-    """Infer domain dependencies from static code references (imports/includes)."""
-    cfg, conn = _setup(config, repo, rev, db)
-    _head("Link")
-    provider = None if no_llm else build_provider(cfg, conn)
-    link(conn, provider, cfg, cfg["repo"]["path"], log=_log)
-
-
-app.command(name="link")(link_cmd)
-
-
-@app.command()
 def graph(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
           out: Optional[str] = typer.Option(None, "--out", help="HTML output path"),
           json_out: Optional[str] = typer.Option(None, "--json", help="features.json output path")):
@@ -245,7 +231,6 @@ def run(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db
         _head("Chronicle"); chronicle(conn, provider, repo_path, log=_log)
     _head("Lifecycle"); lifecycle(conn, repo_path, head, cfg, log=_log)
     _head("Index"); build_index(conn, provider, log=_log)
-    _head("Link"); link(conn, provider, cfg, repo_path, log=_log)
     _head("Graph")
     res = export_graph(conn, out or cfg["output"]["html"], json_out or cfg["output"]["json"], log=_log)
     console.print(f"\n[bold green]Done.[/] {res.get('domains')} domains. "

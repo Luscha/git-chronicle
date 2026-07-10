@@ -48,9 +48,9 @@ The pipeline is a sequence of resumable stages over a single SQLite file (the
 source of truth). Re-running any stage skips work already done.
 
 ```
- extract ─▶ signals ─▶ untangle ─▶ catalog ──────────────▶ attribute ─▶ lifecycle ─▶ index ─▶ link ─▶ graph
- (git)      (derive)   (LLM: 1     (induce taxonomy ONCE,   (map          (active/     (search)  (LLM:    (HTML +
-                        call/commit) then classify every      commits↔      dormant/              relations) JSON)
+ extract ─▶ signals ─▶ untangle ─▶ catalog ──────────────▶ attribute ─▶ lifecycle ─▶ index ─▶ graph
+ (git)      (derive)   (LLM: 1     (induce taxonomy ONCE,   (map          (active/     (search)  (HTML +
+                        call/commit) then classify every      commits↔      dormant/              JSON)
                                      concern BY ID)           domains)      removed)
                                                                        └▶ [chronicle] (opt-in, LLM narrative)
 ```
@@ -99,10 +99,9 @@ source of truth). Re-running any stage skips work already done.
 6. **lifecycle** — Mark each domain active / dormant / removed over time.
 7. **index** — Semantic (embeddings) + full-text (FTS5) search over the knowledge
    base.
-8. **link** — Infer inter-domain relations (LLM-judged from co-change + semantics).
-9. **chronicle** *(opt-in, `--chronicle`)* — Narrate each feature's evolution as
+8. **chronicle** *(opt-in, `--chronicle`)* — Narrate each feature's evolution as
    commit-anchored chapters, plus a repository-wide chronicle.
-10. **graph** — Export a self-contained interactive browser (`graph.html`) and a
+9. **graph** — Export a self-contained interactive browser (`graph.html`) and a
     machine-readable `domains.json`.
 
 By default `run` produces the **structural map** (features named & classified,
@@ -210,7 +209,7 @@ code comprehension. Model class and where you run it are the main constraints.
 | **≤3B** | ❌ **Unfitting.** Mislabels concerns, parrots the prompt. Smoke tests only. |
 | **7B** | ⚠️ **Usable floor.** Decent but error-prone. |
 | **14–32B** | ✅ **Sweet spot** for untangle quality. |
-| **70B-class** | Best judgment; reserve for the few `link`/merge/`ask` calls (`[providers.chat_large]`). Overkill for bulk untangle. |
+| **70B-class** | Best judgment; reserve for the few glossary/merge/`ask` calls (`[providers.chat_large]`). Overkill for bulk untangle. |
 
 **Where to run it** — same prompt, ~6,000-commit history:
 
