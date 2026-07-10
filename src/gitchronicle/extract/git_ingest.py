@@ -21,6 +21,39 @@ CM = "\x01__C__\x01"  # start-of-commit marker
 _FIELDS = ["%H", "%P", "%an", "%ae", "%cn", "%ce", "%aI", "%cI", "%s", "%b"]
 
 
+class BatchReader:
+    """Persistent ``git cat-file --batch`` process: thousands of blob reads without one
+    subprocess spawn each (a 2,000-file import's family analysis would otherwise fork
+    ~15k times). Not thread-safe — create one per worker and close it."""
+
+    def __init__(self, repo: str | Path):
+        self._proc = subprocess.Popen(
+            ["git", "-C", str(repo), "cat-file", "--batch"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def read(self, rev: str, path: str, limit: int | None = None) -> str:
+        try:
+            self._proc.stdin.write(f"{rev}:{path}\n".encode())
+            self._proc.stdin.flush()
+            header = self._proc.stdout.readline().decode("utf-8", "replace")
+            parts = header.split()
+            if len(parts) != 3 or parts[1] != "blob":
+                return ""
+            size = int(parts[2])
+            data = self._proc.stdout.read(size + 1)[:size]   # always consume trailing NL
+            text = data.decode("utf-8", "replace")
+            return text[:limit] if limit else text
+        except (BrokenPipeError, ValueError, OSError):
+            return ""
+
+    def close(self) -> None:
+        try:
+            self._proc.stdin.close()
+            self._proc.terminate()
+        except OSError:
+            pass
+
+
 def run_git(repo: str | Path, args: list[str], check: bool = True) -> str:
     res = subprocess.run(
         ["git", "-C", str(repo), *args],

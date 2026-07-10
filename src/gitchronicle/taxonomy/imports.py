@@ -41,16 +41,21 @@ def extract_import_refs(text: str) -> set[str]:
 
 
 def family_include_counts(repo: str, commit: str, files: list[str],
-                          max_read: int = 40, head_chars: int = 12000) -> Counter:
+                          max_read: int = 40, head_chars: int = 12000,
+                          reader=None) -> Counter:
     """How many times each family member is referenced BY other members, at `commit`.
-    Reads each member's head once; resolves references within the family by basename."""
+    Reads each member's head once; resolves references within the family by basename.
+    Pass a git_ingest.BatchReader to avoid one subprocess per file."""
     base_of = {f: f.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower() for f in files}
     by_base: dict[str, list[str]] = {}
     for f, b in base_of.items():
         by_base.setdefault(b, []).append(f)
     counts: Counter = Counter()
     for f in files[:max_read]:
-        text = run_git(repo, ["show", f"{commit}:{f}"], check=False)[:head_chars]
+        if reader is not None:
+            text = reader.read(commit, f, limit=head_chars)
+        else:
+            text = run_git(repo, ["show", f"{commit}:{f}"], check=False)[:head_chars]
         if not text:
             continue
         for ref in extract_import_refs(text):

@@ -122,7 +122,11 @@ def _vendor_roots(paths, repo_exts):
 
 
 def _stem_families(paths):
-    """Partition by rarest shared stem (>=2 files); leftover files form no family."""
+    """Partition by rarest shared stem (>=2 files); leftover files form no family.
+    Scaffold families are routed to leftover: build scaffolding repeats one-file-per-
+    directory across the tree (Makefile x12 dirs, precompiled headers everywhere), while
+    a real feature's files cluster in one or two directories — dispersion tells them
+    apart with no name stoplist."""
     from ..taxonomy.ground import path_stems
     stems_of = {p: path_stems(p) for p in paths}
     freq = Counter(s for st in stems_of.values() for s in st)
@@ -135,17 +139,27 @@ def _stem_families(paths):
             fam[cands[0]].append(p)
         else:
             leftover.append(p)
-    return {s: fs for s, fs in fam.items() if len(fs) >= _FAMILY_MIN}, leftover
+    out = {}
+    for s, fs in fam.items():
+        if len(fs) < _FAMILY_MIN:
+            continue
+        dirs = {f.rsplit("/", 1)[0] if "/" in f else "" for f in fs}
+        if len(fs) >= 6 and len(dirs) / len(fs) >= 0.8:   # scaffold dispersion signature
+            leftover += fs
+            continue
+        out[s] = fs
+    return out, leftover
 
 
-def _representative(repo, h, stem, files):
+def _representative(repo, h, stem, files, reader=None):
     """The family's most declarative member: must CARRY the family stem (a bundled foreign
     header can never define the family), prefer headers, break ties by how often the family
     itself includes the file."""
     from ..taxonomy.ground import path_stems
     from ..taxonomy.imports import family_include_counts
     carriers = [f for f in files if stem in path_stems(f)] or files
-    inc = family_include_counts(repo, h, files) if len(files) > 2 else Counter()
+    inc = (family_include_counts(repo, h, files, reader=reader)
+           if len(files) > 2 else Counter())
 
     def rank(f):
         header = f.rsplit(".", 1)[-1].lower() in ("h", "hpp", "hh", "pyi")
@@ -167,29 +181,34 @@ def _overflow_concerns(provider, repo, h, rows, repo_exts):
     work = [p for p in work if p not in vfiles]
     fams, leftover = _stem_families(work)
 
-    items = sorted(fams.items())
-    for i in range(0, len(items), _PEEK_BATCH):
-        part = items[i:i + _PEEK_BATCH]
-        blocks = []
-        for j, (s, fs) in enumerate(part):
-            rep = _representative(repo, h, s, fs)
-            head = run_git(repo, ["show", f"{h}:{rep}"], check=False)[:_PEEK_CHARS]
-            blocks.append(f"[{j}] family '{s}' ({rep.rsplit('/', 1)[-1]}):\n{head}")
-        try:
-            got = provider.chat(PEEK_SYS, "\n\n".join(blocks), want_json=True,
-                                cache_extra=f"upeek:{h}:{i}")
-        except Exception:  # noqa: BLE001
-            got = {}
-        labels = got.get("labels", {}) if isinstance(got, dict) else {}
-        for j, (s, fs) in enumerate(part):
-            r = labels.get(str(j)) or {}
-            name = str((r.get("name") if isinstance(r, dict) else "") or "").strip()[:80]
-            if name and name.lower() != "inconclusive":
-                out.append({"label": name, "origin": "import",
-                            "summary": str(r.get("definition") or "").strip()[:300],
-                            "files": fs})
-            else:
-                leftover += fs
+    from ..extract.git_ingest import BatchReader
+    reader = BatchReader(repo)
+    try:
+        items = sorted(fams.items())
+        for i in range(0, len(items), _PEEK_BATCH):
+            part = items[i:i + _PEEK_BATCH]
+            blocks = []
+            for j, (s, fs) in enumerate(part):
+                rep = _representative(repo, h, s, fs, reader=reader)
+                head = reader.read(h, rep, limit=_PEEK_CHARS)
+                blocks.append(f"[{j}] family '{s}' ({rep.rsplit('/', 1)[-1]}):\n{head}")
+            try:
+                got = provider.chat(PEEK_SYS, "\n\n".join(blocks), want_json=True,
+                                    cache_extra=f"upeek:{h}:{i}")
+            except Exception:  # noqa: BLE001
+                got = {}
+            labels = got.get("labels", {}) if isinstance(got, dict) else {}
+            for j, (s, fs) in enumerate(part):
+                r = labels.get(str(j)) or {}
+                name = str((r.get("name") if isinstance(r, dict) else "") or "").strip()[:80]
+                if name and name.lower() != "inconclusive":
+                    out.append({"label": name, "origin": "import",
+                                "summary": str(r.get("definition") or "").strip()[:300],
+                                "files": fs})
+                else:
+                    leftover += fs
+    finally:
+        reader.close()
     if leftover:
         out.append({"label": "bulk change remainder", "origin": "import-misc",
                     "summary": f"{len(leftover)} bulk-changed files without a peek-conclusive "

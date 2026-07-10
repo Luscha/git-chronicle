@@ -391,10 +391,22 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
 
     conn.execute("DELETE FROM glossary WHERE status='candidate'")
     seen = set()
-    n = 0
+    n = n_placeholder = 0
     for e in final:
         name = str(e["name"]).strip()[:60]
         if name.lower() in seen:
+            continue
+        # a definition that adds no information beyond the name is worse than no entity:
+        # it anchors nothing and pollutes review. The stem stays in the census either way.
+        d = str(e.get("definition") or "").strip().lower()
+        name_words = set(re.findall(r"[a-z]+", name.lower()))
+        d_head = set(re.findall(r"[a-z]+", d[:70]))
+        if (not d or "related functionality" in d
+                or (d.startswith(("manages", "handles", "provides"))
+                    and len(d_head - name_words - {"manages", "handles", "provides",
+                                                   "functionality", "including", "related",
+                                                   "system", "and", "the", "for", "with"}) < 3)):
+            n_placeholder += 1
             continue
         seen.add(name.lower())
         stems = [str(s).lower().strip() for s in (e.get("stems") or []) if str(s).strip()][:12]
@@ -408,29 +420,44 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
              json.dumps({"docs": docs_ev}), source, tier))
         n += 1
     conn.commit()
-    log(f"  glossary: {n} entities after merge")
+    log(f"  glossary: {n} entities after merge ({n_placeholder} placeholder-definition "
+        f"candidates suppressed)")
     return n
 
 
 def inject_new_import_entities(conn, log=print) -> int:
     """Incremental path: import families from NEW bulk commits become glossary entities
-    even when the full glossary re-draft is skipped. Deterministic, no LLM."""
-    have = {r["name"].lower() for r in conn.execute("SELECT name FROM glossary")}
+    even when the full glossary re-draft is skipped. Deterministic, no LLM.
+    Novelty is decided by STEM TERRITORY, not by name — the drafting merge renames and
+    merges families, so name matching re-injects everything it already absorbed (measured:
+    275 duplicates). A family whose normalized stems are already half-claimed by one
+    existing entity is represented; its concerns classify against that entity instead."""
     god = {r["stem"] for r in conn.execute("SELECT stem FROM stem_census WHERE is_god=1")}
+    have_names = {r["name"].lower() for r in conn.execute("SELECT name FROM glossary")}
+    territories = []
+    for r in conn.execute("SELECT stems FROM glossary"):
+        territories.append(_norm_stems(set(json.loads(r["stems"] or "[]"))))
     n = 0
     for r in conn.execute("SELECT label, summary, files FROM concerns WHERE origin='import'"):
         name = r["label"].strip()[:60]
-        if not name or name.lower() in have:
+        if not name or name.lower() in have_names:
             continue
         stems: set = set()
         for f in json.loads(r["files"] or "[]")[:8]:
             stems |= path_stems(f)
+        stems -= god
+        nest = _norm_stems(stems)
+        small_claimed = any(nest and len(nest & t) * 2 >= (min(len(nest), len(t)) or 1)
+                            for t in territories)
+        if small_claimed:
+            continue
         conn.execute(
             "INSERT INTO glossary (name, definition, stems, evidence, source, tier, status) "
             "VALUES (?,?,?,?, 'import', 3, 'candidate')",
             (name, (r["summary"] or "").strip()[:500],
-             json.dumps(sorted(stems - god)[:12]), json.dumps({"docs": []})))
-        have.add(name.lower())
+             json.dumps(sorted(stems)[:12]), json.dumps({"docs": []})))
+        have_names.add(name.lower())
+        territories.append(nest)
         n += 1
     conn.commit()
     if n:
