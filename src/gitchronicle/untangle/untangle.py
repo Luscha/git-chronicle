@@ -48,6 +48,7 @@ DIFF_SYS = (
     "Prefer the concrete capability over generic surface words (System, Options, Update, Handling). "
     "The label is NOT the commit prefix and NOT a file name. Assign every listed file to exactly "
     "one concern. If the whole commit serves one purpose, return a single concern with all files. "
+    "Also give each concern a one-sentence summary of WHAT the change does, grounded in the diff. "
     "Respond with ONE JSON object."
 )
 # --- message-routed prompt: normalise a single-purpose commit's subject into a clean label ---
@@ -58,7 +59,8 @@ MSG_SYS = (
     "NOT a location-free surface word. Keep the concrete meaning of the subject. "
     "Respond with ONE JSON object: {\"concerns\":[{\"label\":\"short capability phrase\"}]}."
 )
-SCHEMA = 'Return JSON: {"concerns":[{"label":"short capability phrase","files":["path", ...]}]}'
+SCHEMA = ('Return JSON: {"concerns":[{"label":"short capability phrase",'
+          '"summary":"one sentence: what this change does","files":["path", ...]}]}')
 
 _CONV = re.compile(r"\b(feat|fix|refactor|chore|docs|style|perf|test|build|ci)\b", re.I)
 
@@ -113,6 +115,7 @@ def _coerce(out, files, fallback_label):
             if not isinstance(cc, dict):
                 continue
             label = (cc.get("label") or "").strip()[:80]
+            summary = (cc.get("summary") or "").strip()[:300]
             matched = []
             for f in (cc.get("files") or []):
                 if not isinstance(f, str):
@@ -129,14 +132,14 @@ def _coerce(out, files, fallback_label):
             if label and not matched and len(raw) == 1:
                 matched = [f for f in files if f not in assigned]
             if label and matched:
-                concerns.append({"label": label, "files": matched})
+                concerns.append({"label": label, "summary": summary, "files": matched})
                 assigned.update(matched)
     leftover = [f for f in files if f not in assigned]
     if leftover:
         if concerns:
             concerns[0]["files"] += leftover
         else:
-            concerns.append({"label": fallback_label, "files": leftover})
+            concerns.append({"label": fallback_label, "summary": "", "files": leftover})
     return concerns
 
 
@@ -232,8 +235,11 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
             continue
         out = results.get(h) or {}
         for cc in _coerce(out, files, (r["subject"] or "change")[:80]):
-            conn.execute("INSERT INTO concerns (commit_hash, label, files, kind) VALUES (?,?,?,?)",
-                         (h, cc["label"], json.dumps(cc["files"]), kinds.get(h)))
+            # msg-routed commits get no LLM summary; the subject is the change's one-liner.
+            summary = cc["summary"] or (None if route[h] else (r["subject"] or "").strip()[:300])
+            conn.execute("INSERT INTO concerns (commit_hash, label, summary, files, kind) "
+                         "VALUES (?,?,?,?,?)",
+                         (h, cc["label"], summary, json.dumps(cc["files"]), kinds.get(h)))
             nconc += 1
         mark_stage(conn, "untangle", h)
         done += 1

@@ -94,45 +94,41 @@ def _embed_concerns(conn, provider, log):
     return vec
 
 
-def catalog(conn, provider, cfg: dict, rev_range: str, git_head: str | None = None, log=print) -> dict:
-    cat = cfg.get("catalog", {})
-    if cat.get("method", "leiden") == "semantic":
-        from .semantic import reconstruct
-        return reconstruct(conn, provider, cfg, git_head, rev_range, log)
+def cluster_concerns(ids, Mn, cfiles, cat, log, min_size: int = 2):
+    """Shared clustering core: kNN + rare-file-affinity graph over unit concern vectors,
+    partitioned with stability-picked CPM Leiden. Returns (membership, resolution, modularity).
+    Used by both the leiden catalog method and taxonomy induction."""
+    n = len(ids)
     knn = int(cat.get("knn", 10))
-    min_size = int(cat.get("min_domain_concerns", 2))
     # Seed igraph's RNG so Leiden is reproducible run-to-run (deterministic pipeline).
     random.seed(int(cat.get("seed", 20240607)))
     ig.set_random_number_generator(random)
 
-    vec = _embed_concerns(conn, provider, log)
-    cfiles = {r["id"]: r["files"] for r in conn.execute("SELECT id, files FROM concerns")}
-    ids = [r["id"] for r in conn.execute("SELECT id FROM concerns ORDER BY id") if r["id"] in vec]
-    n = len(ids)
-    if n < 2:
-        log("  not enough concerns to cluster (run untangle first)")
-        return {"domains": 0}
-
-    M = np.vstack([vec[i] for i in ids])
-    Mn = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-9)
-    S = Mn @ Mn.T
-
-    # (1) Semantic label edges: kNN on concern-label embeddings, baseline-rescaled.
+    # (1) Semantic edges: kNN on concern embeddings, baseline-rescaled. Computed in row
+    # blocks — O(block*n) memory instead of the full n*n matrix, so 50k+-concern histories
+    # fit in RAM (65k concerns would need ~17GB materialized).
     k = min(knn + 1, n)
-    pairs = set()
-    for i in range(n):
-        for j in np.argpartition(-S[i], k - 1)[:k]:
-            j = int(j)
-            if j != i:
-                pairs.add((i, j) if i < j else (j, i))
-    coslist = [float(S[i, j]) for i, j in pairs]
+    paircos: dict[tuple, float] = {}
+    block = 2048
+    for i0 in range(0, n, block):
+        S = Mn[i0:i0 + block] @ Mn.T
+        for bi in range(S.shape[0]):
+            i = i0 + bi
+            row = S[bi]
+            for j in np.argpartition(-row, k - 1)[:k]:
+                j = int(j)
+                if j != i:
+                    p = (i, j) if i < j else (j, i)
+                    if p not in paircos:
+                        paircos[p] = float(row[j])
+    coslist = list(paircos.values())
     base = float(np.percentile(coslist, 60)) if coslist else 0.5   # bge-m3 has a high baseline
     span = max(1e-6, 1.0 - base)
     wmap: dict[tuple, float] = {}
-    for i, j in pairs:
-        w = max(0.0, (float(S[i, j]) - base) / span)
+    for p, cos in paircos.items():
+        w = max(0.0, (cos - base) / span)
         if w > 0:
-            wmap[(i, j)] = w
+            wmap[p] = w
 
     # (2) Rare-file affinity: concerns that touch the same FEATURE-SPECIFIC file are related
     # even when their labels are generic ("Options UI", "Interface"). We weight each shared
@@ -175,7 +171,31 @@ def catalog(conn, provider, cfg: dict, rev_range: str, git_head: str | None = No
     res, part, mod = _choose_partition(
         g, list(cat.get("cpm_gamma_sweep", [0.008, 0.012, 0.016, 0.02, 0.025, 0.03, 0.04, 0.05, 0.07, 0.09])),
         min_size, log)
-    membership = part.membership
+    return part.membership, res, mod
+
+
+def catalog(conn, provider, cfg: dict, rev_range: str, git_head: str | None = None, log=print) -> dict:
+    cat = cfg.get("catalog", {})
+    method = cat.get("method", "taxonomy")
+    if method == "taxonomy":
+        from ..taxonomy import build_taxonomy
+        return build_taxonomy(conn, provider, cfg, git_head, rev_range, log)
+    if method == "semantic":
+        raise SystemExit("catalog.method='semantic' (growing-list) was replaced by 'taxonomy' — "
+                         "update config.toml (or remove the setting to use the default).")
+    min_size = int(cat.get("min_domain_concerns", 2))
+    vec = _embed_concerns(conn, provider, log)
+    cfiles = {r["id"]: r["files"] for r in conn.execute("SELECT id, files FROM concerns")}
+    ids = [r["id"] for r in conn.execute("SELECT id FROM concerns ORDER BY id") if r["id"] in vec]
+    n = len(ids)
+    if n < 2:
+        log("  not enough concerns to cluster (run untangle first)")
+        return {"domains": 0}
+
+    M = np.vstack([vec[i] for i in ids])
+    Mn = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-9)
+    idx = {cid: p for p, cid in enumerate(ids)}
+    membership, res, mod = cluster_concerns(ids, Mn, cfiles, cat, log, min_size)
     clusters = defaultdict(list)
     for node, comm in enumerate(membership):
         clusters[comm].append(ids[node])
@@ -190,7 +210,8 @@ def catalog(conn, provider, cfg: dict, rev_range: str, git_head: str | None = No
     run_id = conn.execute(
         "INSERT INTO discovery_runs (algorithm, params, git_head, rev_range, n_files, n_domains, "
         "modularity, created_at) VALUES ('leiden-concerns',?,?,?,?,?,?,?)",
-        (json.dumps({"resolution": res, "knn": knn}), git_head, rev_range, n, len(kept), mod, now_iso()),
+        (json.dumps({"resolution": res, "knn": int(cat.get("knn", 10))}),
+         git_head, rev_range, n, len(kept), mod, now_iso()),
     ).lastrowid
 
     labels = {r["id"]: (r["label"] or "") for r in conn.execute("SELECT id, label FROM concerns")}

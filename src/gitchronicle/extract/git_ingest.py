@@ -34,8 +34,9 @@ def run_git(repo: str | Path, args: list[str], check: bool = True) -> str:
 def rev_list(repo: str | Path, rev_range: str) -> list[str]:
     """All commit hashes reachable in a rev-range (newest first), merges included. Anchored at the
     default branch, this is its FULL history — every merged-PR commit is an ancestor and included;
-    only never-merged feature branches are naturally excluded."""
-    out = run_git(repo, ["rev-list", rev_range])
+    only never-merged feature branches are naturally excluded. The range may hold several
+    whitespace-separated revs (e.g. 'A..B ^C' to exclude a huge merged branch)."""
+    out = run_git(repo, ["rev-list", *rev_range.split()])
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
@@ -61,7 +62,7 @@ def _parse_numstat(block: str) -> tuple[list[dict], int, int]:
 def extract_commits(repo: str | Path, rev_range: str) -> list[dict]:
     """Parse commit metadata + per-file churn in a single ``git log`` pass."""
     fmt = CM + US.join(_FIELDS) + RS
-    out = run_git(repo, ["log", "--no-renames", "--numstat", f"--format={fmt}", rev_range])
+    out = run_git(repo, ["log", "--no-renames", "--numstat", f"--format={fmt}", *rev_range.split()])
     commits: list[dict] = []
     for chunk in out.split(CM):
         if not chunk.strip():

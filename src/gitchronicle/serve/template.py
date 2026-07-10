@@ -116,7 +116,7 @@ function pickArea(id){ selArea=id; selDom=null; renderAreas(curAreas(),curQ());
 function renderDomains(list,q){
   const el=document.getElementById("domains");
   el.innerHTML=list.map(d=>`<div class="row${d.id===selDom?' sel':''}" onclick="pickDom(${d.id})">
-    <div class="nm">${hl(d.name,q)}</div>
+    <div class="nm">${hl(d.name,q)}${d.status==='provisional'?' <span class="kbd" style="background:#EECA3B;color:#333" title="machine-proposed, pending review">provisional</span>':''}</div>
     <div class="mm"><span class="kbd ${kc(d.classification)}">${esc(d.classification)}</span>
       ${d.n_commits} commits · ${d.n_files} files · ${esc(d.first_seen)}→${esc(d.last_seen)}</div></div>`).join("")
     || '<div class="row mm">no domains</div>';
@@ -135,7 +135,7 @@ function renderDetail(d){
   const tags=(d.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("");
   document.getElementById("detail").innerHTML=`
     <div class="crumb"><b onclick="pickArea(${a.id})">${esc(a.name)}</b> › domain</div>
-    <p class="dtitle">${esc(d.name)}</p>
+    <p class="dtitle">${esc(d.name)}${d.status==='provisional'?' <span class="kbd" style="background:#EECA3B;color:#333">provisional</span>':''}</p>
     <div><span class="kbd ${kc(d.classification)}">${esc(d.classification)}</span> ${tags}</div>
     <div class="statbar"><span><b>${d.n_commits}</b> commits</span><span><b>${d.n_files}</b> files</span>
       <span><b>${(d.concerns||[]).length}</b> concerns</span><span>${esc(d.first_seen)} → ${esc(d.last_seen)}</span>

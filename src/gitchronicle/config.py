@@ -59,10 +59,12 @@ DEFAULTS: dict[str, Any] = {
         },
     },
     "label": {"max_commits_ctx": 30, "max_body_chars": 400},
-    # Domain discovery from file change-coupling. Generic algorithm params (not repo-
-    # specific): resolution is chosen data-driven (max modularity), no target count.
-    # Domains are clusters of untangled CONCERNS (semantic), not files. Data-driven.
+    # Feature reconstruction. Default method "taxonomy" = induce a fixed feature taxonomy
+    # once (clustered facets, contrastively named, with definitions), then classify every
+    # concern against it BY ID (embedding fast path -> LLM shortlist pick -> propose-new for
+    # the rest). "leiden" = pure embedding clustering (no chat LLM; legacy).
     "catalog": {
+        "method": "taxonomy",
         "knn": 10,
         # CPM Leiden resolution (gamma) sweep; the coarsest STABLE gamma is picked data-driven.
         # CPM avoids modularity's resolution limit, so large dense regions split into real pieces.
@@ -72,6 +74,26 @@ DEFAULTS: dict[str, Any] = {
         # Rare-file affinity: concerns sharing a feature-specific file cluster together even
         # when labels are generic; god-files (df > 95th pct) are excluded so they can't blob.
         "file_affinity_weight": 0.6,
+        # taxonomy method:
+        "induce_min_cluster": 3,   # smaller proto-clusters are left to classification
+        "shortlist_k": 8,          # candidate features shown to the LLM per concern
+        "classify_batch": 12,      # concerns per classification call
+        "propose_batch": 30,       # none-fits per propose-new call
+        # Embedding fast path: assign without the LLM only on a CLEAR winner. Validated on
+        # void-queue: wrong fast picks clustered at top1 0.62-0.63, correct ones >= 0.66.
+        "fast_margin": 0.06,       # top1-top2 margin ...
+        "fast_floor": 0.66,        # ... and absolute top1 floor
+        "audit_z": -2.0,           # per-feature outlier threshold (z-score of centroid cosine)
+        "audit_move_margin": 0.03, # audit move must beat the old home cosine by this much
+        "audit_unassign_floor": 0.55,  # auditor answered 0 + home cosine below this -> freed
+        "autoconfirm_runs": 2,     # provisional -> named after surviving this many runs ...
+        "autoconfirm_concerns": 5, # ... with at least this many concerns
+        # v3 ground layer:
+        "census_top": 800,         # stems kept in the census (LLM input stays bounded)
+        "glossary_chunk": 150,     # census stems per glossary-drafting call
+        "glossary_max_docs": 120,  # in-repo docs harvested
+        "stem_boost": 0.12,        # shortlist bonus when concern & feature share a stem
+        "novelty_min": 4,          # min cluster size for batch-novelty proposals
     },
     "discover": {"max_diffs": 3, "max_diff_lines": 120, "max_files_ctx": 25, "max_hints": 12,
                  # near-duplicate domain merge: consider name-token OR embedding-similar pairs

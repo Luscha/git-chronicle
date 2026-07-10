@@ -48,10 +48,10 @@ The pipeline is a sequence of resumable stages over a single SQLite file (the
 source of truth). Re-running any stage skips work already done.
 
 ```
- extract ─▶ signals ─▶ untangle ─▶ catalog ─▶ attribute ─▶ lifecycle ─▶ index ─▶ link ─▶ graph
- (git)      (derive)   (LLM: 1     (LLM:       (map          (active/     (search)  (LLM:    (HTML +
-                        call/commit) reconstruct  commits↔      dormant/              relations) JSON)
-                                     features)    domains)      removed)
+ extract ─▶ signals ─▶ untangle ─▶ catalog ──────────────▶ attribute ─▶ lifecycle ─▶ index ─▶ link ─▶ graph
+ (git)      (derive)   (LLM: 1     (induce taxonomy ONCE,   (map          (active/     (search)  (LLM:    (HTML +
+                        call/commit) then classify every      commits↔      dormant/              relations) JSON)
+                                     concern BY ID)           domains)      removed)
                                                                        └▶ [chronicle] (opt-in, LLM narrative)
 ```
 
@@ -71,19 +71,27 @@ source of truth). Re-running any stage skips work already done.
 2. **signals** — Cheap per-commit enrichment (connected components, conventional-
    commit kind, …).
 3. **untangle** — The heart of the pipeline. **One LLM pass per commit** reads the
-   diff and splits it into *concerns*. Adaptive routing keeps it cheap: a small,
-   clean commit is labelled from its message; a tangled/large/terse commit is
-   escalated to read the (bounded) diff. This is what lets a change to a god-class
-   be attributed to the *feature* it serves rather than the file it lives in.
-4. **catalog** — **Semantic reconstruction** of the feature set. The LLM walks the
-   concerns keeping a growing feature list and, with each change in front of it,
-   decides *"an existing feature, or a new one?"*. Three rules keep it honest:
-   *specificity* (a concrete feature beats a generic mechanism — a "lobby slow-queue
-   affect" is **Matchmaking**, not the generic **Effects** system), *label
-   authority* (the untangled concern label wins over a tangled commit subject), and
-   *no vague buckets* (a de-vague pass re-assigns anything that lands in
-   System/UI/Misc). Features are then grouped into areas. Domains and areas come
-   out already named.
+   diff and splits it into *concerns* (label + one-sentence summary + files).
+   Adaptive routing keeps it cheap: a small, clean commit is labelled from its
+   message; a tangled/large/terse commit is escalated to read the (bounded) diff.
+   This is what lets a change to a god-class be attributed to the *feature* it
+   serves rather than the file it lives in.
+4. **catalog** — Two-phase feature reconstruction (the TnT-LLM / Clio shape:
+   *induce a taxonomy once, then classify everything against it by ID*):
+   - **induce** (first run only) — concern facets (label + summary + paths) are
+     embedded and clustered; each cluster is named **contrastively** (the LLM sees
+     samples from neighbouring clusters and must pick a name that distinguishes
+     this one) and gets a **definition** with includes/excludes criteria; one
+     reconcile pass merges near-duplicates at taxonomy level. The result is a
+     fixed, deduplicated feature list — the label space.
+   - **classify** (every run) — each concern is assigned **closed-set, by feature
+     ID**, through a cascade: embedding fast path (clear cosine winner, no LLM) →
+     LLM pick from a top-k shortlist (an ID can't be misspelled, paraphrased or
+     vague; out-of-shortlist answers are rejected and retried) → concerns that fit
+     *no* feature accumulate and are grouped into **new provisional features**
+     (used immediately, flagged for the optional review) → an audit pass
+     re-classifies per-feature embedding outliers. Specificity lives in each
+     feature's *definition*, not in global prompt heuristics.
 5. **attribute** — Map commits ↔ domains (many-to-many, via their concerns), and
    derive each domain's characteristic files (weighted by *specificity* — a
    god-class touched by every feature is down-weighted; a file unique to one
@@ -99,6 +107,48 @@ source of truth). Re-running any stage skips work already done.
 
 By default `run` produces the **structural map** (features named & classified,
 their files, authors, and commit timeline). Add `--chronicle` for the **narrative**.
+
+### Incremental runs & the (optional) review seam
+
+The taxonomy is **induced once and then frozen**: later runs classify new commits
+against it cheaply and stably. Concerns that fit no existing feature become
+**provisional** features — used immediately (nothing is ever left out of the KB),
+visibly badged in `graph.html`/`domains.json`, and listed as a pending *changeset*
+at the end of each run. The pipeline **never blocks on a human**; provisional
+features that keep attracting concerns across runs auto-confirm, so a fully
+unattended install converges on its own. When you *do* want to curate:
+
+```bash
+gitchronicle taxonomy review          # print the pending changeset
+gitchronicle taxonomy review --edit   # rebase-i style plan in $EDITOR:
+                                      #   accept | reject | lock | merge -> X | rename -> Y
+gitchronicle taxonomy list|show|merge|rename|reject|confirm|export|import
+```
+
+Rejecting a feature **tombstones** its name (it is never re-proposed) and re-homes
+its concerns. Every applied verb is recorded as a golden-record annotation — an
+accumulating regression set for pipeline changes.
+
+**In automation** the plan file is the interface — humans and scripts share it:
+
+```bash
+# 1. unattended (cron): run, detect drift, notify — auto-confirm converges the rest
+gitchronicle run ...
+gitchronicle taxonomy review --json   # {"pending": N, "proposals": [...]}
+
+# 2. gated CI: exit 2 = changes await review (terraform-style)
+gitchronicle run --frozen || {
+  gitchronicle taxonomy review --edit   # non-tty: writes taxonomy-review.txt
+  # commit taxonomy-review.txt (+ taxonomy export) to a branch, open a PR;
+  # reviewers edit the verbs in ordinary code review
+}
+# on PR merge:
+gitchronicle taxonomy review --apply taxonomy-review.txt
+
+# 3. headless curation, no files
+gitchronicle taxonomy merge "Skill Tree System" "Skill Tree"
+gitchronicle taxonomy reject "Misc Fixes"
+```
 
 ---
 
@@ -132,8 +182,8 @@ Or run stages individually (each is resumable):
 ```bash
 gitchronicle extract      # commits, file churn, branches, tags
 gitchronicle signals      # per-commit signals
-gitchronicle untangle     # LLM: diff -> concerns
-gitchronicle catalog      # LLM: reconstruct features (domains + areas)
+gitchronicle untangle     # LLM: diff -> concerns (label + summary + files)
+gitchronicle catalog      # induce taxonomy (once) + classify concerns by ID
 gitchronicle attribute    # map commits <-> domains, derive files
 gitchronicle index        # semantic + full-text search
 gitchronicle graph        # build/graph.html + build/domains.json
@@ -184,12 +234,12 @@ All written under `build/` by default (git-ignored):
 
 ## Status
 
-**v0.0.1** — first tagged slice. The pipeline runs end-to-end on real,
-decade-scale history and produces isolable functional features with a navigable
-graph. Rough edges remain (e.g. generic-UI work still over-collects into a single
-"UI" domain; some near-duplicate feature names). Planned next: sharper
-mechanism-vs-feature dispersion, a feature-name reconcile pass, the narrative
-chronicle polish, and full-history runs at scale.
+**v0.0.1** — catalog rearchitected from open-set growing-list assignment to
+**induce → freeze → classify-by-ID** (fixed taxonomy with definitions; closed-set
+classification; provisional features + optional review seam; tombstones;
+`--frozen` gated mode). This removes the structural causes of hallucinated /
+near-duplicate feature names and the need for vague-bucket guardrail wordlists.
+Planned next: narrative chronicle polish and full-history runs at scale.
 
 ## License
 

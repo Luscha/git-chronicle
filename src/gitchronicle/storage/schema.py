@@ -104,9 +104,12 @@ CREATE TABLE IF NOT EXISTS concerns (
     id          INTEGER PRIMARY KEY,
     commit_hash TEXT NOT NULL REFERENCES commits(hash) ON DELETE CASCADE,
     label       TEXT,          -- plain capability phrase read from the diff
+    summary     TEXT,          -- one-sentence description of the change (the embedding facet)
     files       TEXT,          -- JSON array: the commit's files belonging to this concern
     kind        TEXT,          -- the commit's work-kind
-    domain_id   INTEGER REFERENCES domains(id)   -- assigned by clustering
+    domain_id   INTEGER REFERENCES domains(id),  -- assigned by classification
+    assign_source TEXT,        -- how domain_id was set: fast|llm|propose|audit|human
+    assign_conf   REAL         -- classification confidence (cosine / margin)
 );
 CREATE INDEX IF NOT EXISTS idx_concerns_commit ON concerns(commit_hash);
 CREATE INDEX IF NOT EXISTS idx_concerns_domain ON concerns(domain_id);
@@ -139,10 +142,13 @@ CREATE TABLE IF NOT EXISTS domains (
     slug             TEXT,
     name             TEXT,
     summary          TEXT,          -- what the domain is (distilled from the chronicle; opt-in)
+    definition       TEXT,          -- taxonomy definition: one sentence + includes/excludes criteria
+    stems            TEXT,          -- JSON array: path stems that evidence this feature (v3 ground)
+    named_from       INTEGER,       -- how many concerns the name was drafted from (rename-on-accretion)
     classification   TEXT,          -- core|feature|subsystem|data|ui|infra|tooling|docs
     fan_in           INTEGER DEFAULT 0,  -- how many other domains depend on this one
     tags             TEXT,          -- JSON array
-    status           TEXT DEFAULT 'candidate',  -- candidate|named|confirmed|rejected
+    status           TEXT DEFAULT 'candidate',  -- candidate|named|provisional|confirmed|rejected
     confidence       REAL,
     lifecycle        TEXT DEFAULT 'active',     -- active|dormant|merged|removed
     removed_at       TEXT,                      -- when the domain's files were deleted
@@ -239,6 +245,39 @@ CREATE TABLE IF NOT EXISTS pipeline_stage_status (
     PRIMARY KEY (stage, item_key)
 );
 
+-- GROUND: repo-level aggregate evidence (the layer per-commit reading can never see).
+-- Stems are name tokens from file paths, weighted by how much history touches them; the
+-- glossary is the big model's draft of the repo's own feature vocabulary, distilled from
+-- the census + in-repo docs. Induction and classification consume both.
+CREATE TABLE IF NOT EXISTS stem_census (
+    stem         TEXT PRIMARY KEY,
+    n_files      INTEGER,          -- distinct files carrying the stem
+    n_concerns   INTEGER,          -- concerns touching those files (the activity weight)
+    ubiquity     REAL,             -- share of ALL files carrying it (high = generic word)
+    is_god       INTEGER DEFAULT 0,-- hub signature: dir-token (huge ubiquity) or its files
+                                   -- are god-files (high median concerns-per-file) — such a
+                                   -- stem legitimately spans features and must never anchor one
+    sample_paths TEXT              -- JSON array
+);
+
+CREATE TABLE IF NOT EXISTS glossary (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT,
+    definition TEXT,
+    stems      TEXT,               -- JSON array: census stems that evidence this entity
+    evidence   TEXT,               -- JSON: {"docs": [...], "paths": [...]}
+    source     TEXT,               -- census|doc|both
+    status     TEXT DEFAULT 'candidate'
+);
+
+-- Rejected feature names. Fed to propose-new as negative examples so a rejected candidate
+-- is never re-proposed run after run (review must not become whack-a-mole).
+CREATE TABLE IF NOT EXISTS taxonomy_tombstones (
+    name       TEXT PRIMARY KEY COLLATE NOCASE,
+    reason     TEXT,
+    created_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS annotations (
     id          INTEGER PRIMARY KEY,
     target_type TEXT,               -- 'feature'|'feature_commit'|'edge'...
@@ -277,6 +316,19 @@ def init_db(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(domains)")}
     if "area_id" not in cols:
         conn.execute("ALTER TABLE domains ADD COLUMN area_id INTEGER REFERENCES areas(id)")
+    if "definition" not in cols:
+        conn.execute("ALTER TABLE domains ADD COLUMN definition TEXT")
+    if "stems" not in cols:
+        conn.execute("ALTER TABLE domains ADD COLUMN stems TEXT")
+    if "named_from" not in cols:
+        conn.execute("ALTER TABLE domains ADD COLUMN named_from INTEGER")
+    ccols = {r[1] for r in conn.execute("PRAGMA table_info(concerns)")}
+    for name, decl in (("summary", "TEXT"), ("assign_source", "TEXT"), ("assign_conf", "REAL")):
+        if name not in ccols:
+            conn.execute(f"ALTER TABLE concerns ADD COLUMN {name} {decl}")
+    scols = {r[1] for r in conn.execute("PRAGMA table_info(stem_census)")}
+    if scols and "is_god" not in scols:
+        conn.execute("ALTER TABLE stem_census ADD COLUMN is_god INTEGER DEFAULT 0")
     conn.commit()
 
 

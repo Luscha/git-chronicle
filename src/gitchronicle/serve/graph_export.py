@@ -25,9 +25,12 @@ _MAX_COMMITS = 40
 
 def _build_payload(conn) -> dict:
     # --- domains (lightweight) grouped by area ---
+    # Provisional (machine-minted, unreviewed) features are exported too — visibly marked,
+    # so a consumer can tell settled taxonomy from pending proposals.
     drows = conn.execute(
-        "SELECT id, area_id, name, slug, classification, tags, lifecycle, "
-        "n_commits, n_files, first_seen, last_seen FROM domains WHERE status='named'"
+        "SELECT id, area_id, name, slug, classification, tags, lifecycle, status, "
+        "n_commits, n_files, first_seen, last_seen FROM domains "
+        "WHERE status IN ('named','confirmed','provisional')"
     ).fetchall()
 
     concerns_by = defaultdict(list)
@@ -61,6 +64,7 @@ def _build_payload(conn) -> dict:
         domains.append({
             "id": did, "area_id": d["area_id"],
             "name": d["name"] or d["slug"] or f"domain {did}",
+            "status": d["status"],
             "classification": d["classification"] or "feature",
             "tags": json.loads(d["tags"]) if d["tags"] else [],
             "lifecycle": lc, "color": _LIFECYCLE_COLOR.get(lc, "#9D755D"),

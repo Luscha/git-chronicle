@@ -17,11 +17,11 @@ path = "build/gitchronicle.db"
 
 [catalog]
 # How domains are formed from concerns:
-#   "semantic" = the LLM reconstructs functional features (growing-list assignment + de-vague pass +
-#                specificity rule); domains and areas come out already named. (Recommended.)
-#   "leiden"   = embedding clustering of concern labels (legacy, no naming).
-method = "semantic"
-assign_batch = 40
+#   "taxonomy" = induce a fixed feature taxonomy once (clustered facets, contrastive naming,
+#                definitions), then classify every concern against it BY ID; drift becomes
+#                provisional features + an optional review seam. (Recommended, default.)
+#   "leiden"   = embedding clustering of concern labels (no chat LLM, no naming; legacy).
+method = "taxonomy"
 
 [untangle]
 workers = 6   # concurrent LLM calls; lower this if your provider rate-limits (HTTP 429)
