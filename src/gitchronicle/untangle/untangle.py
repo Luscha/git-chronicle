@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..enrich.signals import is_vendored
@@ -61,6 +61,141 @@ MSG_SYS = (
 )
 SCHEMA = ('Return JSON: {"concerns":[{"label":"short capability phrase",'
           '"summary":"one sentence: what this change does","files":["path", ...]}]}')
+
+# --- overflow (bulk-commit) path: benchmarked on void-queue mega commits -------------------
+# Files beyond the diff-read cap must not be silently dropped (a 2,000-file initial import is
+# the founding evidence of every original feature). Recipe, every part measured:
+#   move-pair filter -> vendored-drop filter -> stem-family partition -> code-peek labels.
+# Never group by directory (blob dirs hold whole engines); never label from names alone
+# (name-priors poison ground); an inconclusive peek yields NO label, not a guess.
+PEEK_SYS = (
+    "You identify what parts of ONE software project ARE, from code excerpts. For each "
+    "numbered FILE FAMILY (files added together in one bulk commit) you get the head of its "
+    "most declarative file. Name the feature/subsystem/library the family constitutes and "
+    "give a one-sentence concrete definition derived from the CODE (declarations, tokens, "
+    "includes) — never from the file name alone. If the code is inconclusive, use the name "
+    '"inconclusive". '
+    'Respond with ONE JSON object: {"labels":{"<n>":{"name":"...","definition":"..."}}}'
+)
+
+_VENDOR_MIN_FILES = 50       # a foreign drop is a sizeable subtree ...
+_VENDOR_MAX_OVERLAP = 0.2    # ... whose extensions barely overlap the repo's own profile
+_FAMILY_MIN = 2              # smallest stem family that gets its own concern
+_PEEK_BATCH = 5              # families per peek call
+_PEEK_CHARS = 900            # head bytes per representative
+
+
+def _split_moves(rows):
+    """Move-pair filter (per file): an added file pairing a deleted file with the same
+    basename AND same line count is a move under --no-renames — no new semantics."""
+    added = [r for r in rows if r["deletions"] == 0 and r["insertions"] > 0]
+    deleted = [r for r in rows if r["insertions"] == 0 and r["deletions"] > 0]
+    modified = [r for r in rows if r["insertions"] > 0 and r["deletions"] > 0]
+    del_sig = Counter((r["path"].rsplit("/", 1)[-1], r["deletions"]) for r in deleted)
+    real_adds, moves = [], 0
+    for r in added:
+        sig = (r["path"].rsplit("/", 1)[-1], r["insertions"])
+        if del_sig.get(sig, 0) > 0:
+            del_sig[sig] -= 1
+            moves += 1
+        else:
+            real_adds.append(r)
+    return moves, [r["path"] for r in real_adds], [r["path"] for r in modified]
+
+
+def _vendor_roots(paths, repo_exts):
+    """Foreign drops: sizeable subtrees whose extension profile is alien to the repo."""
+    by_root: dict[str, list[str]] = defaultdict(list)
+    for p in paths:
+        parts = p.split("/")
+        by_root["/".join(parts[:2]) if len(parts) > 2 else "(root)"].append(p)
+    vendored = {}
+    for root, fs in by_root.items():
+        if len(fs) < _VENDOR_MIN_FILES:
+            continue
+        exts = Counter(f.rsplit(".", 1)[-1].lower() for f in fs if "." in f)
+        total = sum(exts.values()) or 1
+        overlap = sum(n for e, n in exts.items() if e in repo_exts) / total
+        if overlap < _VENDOR_MAX_OVERLAP:
+            vendored[root] = fs
+    return vendored
+
+
+def _stem_families(paths):
+    """Partition by rarest shared stem (>=2 files); leftover files form no family."""
+    from ..taxonomy.ground import path_stems
+    stems_of = {p: path_stems(p) for p in paths}
+    freq = Counter(s for st in stems_of.values() for s in st)
+    fam: dict[str, list[str]] = defaultdict(list)
+    leftover = []
+    for p in paths:
+        cands = sorted((s for s in stems_of[p] if freq[s] >= _FAMILY_MIN),
+                       key=lambda s: (freq[s], -len(s)))
+        if cands:
+            fam[cands[0]].append(p)
+        else:
+            leftover.append(p)
+    return {s: fs for s, fs in fam.items() if len(fs) >= _FAMILY_MIN}, leftover
+
+
+def _representative(repo, h, stem, files):
+    """The family's most declarative member: must CARRY the family stem (a bundled foreign
+    header can never define the family), prefer headers, break ties by how often the family
+    itself includes the file."""
+    from ..taxonomy.ground import path_stems
+    from ..taxonomy.imports import family_include_counts
+    carriers = [f for f in files if stem in path_stems(f)] or files
+    inc = family_include_counts(repo, h, files) if len(files) > 2 else Counter()
+
+    def rank(f):
+        header = f.rsplit(".", 1)[-1].lower() in ("h", "hpp", "hh", "pyi")
+        return (not header, -inc.get(f, 0), len(f))
+    return sorted(carriers, key=rank)[0]
+
+
+def _overflow_concerns(provider, repo, h, rows, repo_exts):
+    """Overflow files of one bulk commit -> concerns. Returns list of dicts with 'origin'."""
+    moves, adds, modified = _split_moves(rows)
+    work = adds + modified
+    out = []
+    vendored = _vendor_roots(adds, repo_exts)
+    vfiles = {f for fs in vendored.values() for f in fs}
+    for root, fs in vendored.items():
+        out.append({"label": f"vendored drop: {root}", "origin": "import-misc",
+                    "summary": f"third-party/vendored subtree of {len(fs)} files under {root}/",
+                    "files": fs})
+    work = [p for p in work if p not in vfiles]
+    fams, leftover = _stem_families(work)
+
+    items = sorted(fams.items())
+    for i in range(0, len(items), _PEEK_BATCH):
+        part = items[i:i + _PEEK_BATCH]
+        blocks = []
+        for j, (s, fs) in enumerate(part):
+            rep = _representative(repo, h, s, fs)
+            head = run_git(repo, ["show", f"{h}:{rep}"], check=False)[:_PEEK_CHARS]
+            blocks.append(f"[{j}] family '{s}' ({rep.rsplit('/', 1)[-1]}):\n{head}")
+        try:
+            got = provider.chat(PEEK_SYS, "\n\n".join(blocks), want_json=True,
+                                cache_extra=f"upeek:{h}:{i}")
+        except Exception:  # noqa: BLE001
+            got = {}
+        labels = got.get("labels", {}) if isinstance(got, dict) else {}
+        for j, (s, fs) in enumerate(part):
+            r = labels.get(str(j)) or {}
+            name = str((r.get("name") if isinstance(r, dict) else "") or "").strip()[:80]
+            if name and name.lower() != "inconclusive":
+                out.append({"label": name, "origin": "import",
+                            "summary": str(r.get("definition") or "").strip()[:300],
+                            "files": fs})
+            else:
+                leftover += fs
+    if leftover:
+        out.append({"label": "bulk change remainder", "origin": "import-misc",
+                    "summary": f"{len(leftover)} bulk-changed files without a peek-conclusive "
+                               f"family ({moves} moved files excluded)",
+                    "files": leftover})
+    return out
 
 _CONV = re.compile(r"\b(feat|fix|refactor|chore|docs|style|perf|test|build|ci)\b", re.I)
 
@@ -190,12 +325,22 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
         log("  all commits already untangled")
         return {"untangled": 0, "concerns": 0}
 
-    # Pre-fetch each commit's (non-vendored) files once, in the main thread.
-    files_by: dict[str, list[str]] = defaultdict(list)
-    for r in conn.execute("SELECT commit_hash, path FROM commit_files ORDER BY id"):
+    # Pre-fetch each commit's (non-vendored) files once, in the main thread — with per-file
+    # churn, which the overflow path's move-pair filter needs.
+    rows_by: dict[str, list[dict]] = defaultdict(list)
+    for r in conn.execute(
+            "SELECT commit_hash, path, insertions, deletions FROM commit_files ORDER BY id"):
         if not is_vendored(r["path"]):
-            files_by[r["commit_hash"]].append(r["path"])
+            rows_by[r["commit_hash"]].append({"path": r["path"],
+                                              "insertions": r["insertions"] or 0,
+                                              "deletions": r["deletions"] or 0})
+    files_by = {h: [x["path"] for x in v] for h, v in rows_by.items()}
     fileset = {r["hash"]: files_by.get(r["hash"], [])[:max_files] for r in todo}
+    overflow_by = {r["hash"]: rows_by.get(r["hash"], [])[max_files:] for r in todo}
+    # the repo's own extension profile — the vendored-drop filter's baseline
+    extc = Counter(p.rsplit(".", 1)[-1].lower()
+                   for v in files_by.values() for p in v if "." in p)
+    repo_exts = {e for e, _ in extc.most_common(12)}
     # Route each commit: message (cheap) vs diff (escalation).
     route = {r["hash"]: _route_to_diff(r["subject"], len(fileset[r["hash"]]),
                                        max_msg_files, min_subject_len) for r in todo}
@@ -207,8 +352,13 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
     def work(r):
         h, files = r["hash"], fileset[r["hash"]]
         if route[h]:
-            return _infer_diff(provider, repo, h, r["subject"], files, caps)
-        return _infer_msg(provider, repo, h, r["subject"], r["body"], files)
+            out = _infer_diff(provider, repo, h, r["subject"], files, caps)
+        else:
+            out = _infer_msg(provider, repo, h, r["subject"], r["body"], files)
+        # bulk-commit overflow: files beyond the cap become stem-family concerns
+        extra = (_overflow_concerns(provider, repo, h, overflow_by[h], repo_exts)
+                 if overflow_by.get(h) else [])
+        return out, extra
 
     results: dict[str, object] = {}
     fetched = 0
@@ -216,7 +366,7 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
         futs = {}
         for r in todo:
             if not fileset[r["hash"]]:
-                results[r["hash"]] = {}
+                results[r["hash"]] = ({}, [])
                 continue
             futs[ex.submit(work, r)] = r["hash"]
         for fut in as_completed(futs):
@@ -226,14 +376,14 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                 log(f"    {fetched}/{len(futs)} inferred")
 
     # Insert in deterministic todo (authored_at) order so concern ids are reproducible.
-    done = nconc = 0
+    done = nconc = nimp = 0
     for r in todo:
         h = r["hash"]
         files = fileset[h]
         if not files:
             mark_stage(conn, "untangle", h)
             continue
-        out = results.get(h) or {}
+        out, extra = results.get(h) or ({}, [])
         for cc in _coerce(out, files, (r["subject"] or "change")[:80]):
             # msg-routed commits get no LLM summary; the subject is the change's one-liner.
             summary = cc["summary"] or (None if route[h] else (r["subject"] or "").strip()[:300])
@@ -241,11 +391,19 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                          "VALUES (?,?,?,?,?)",
                          (h, cc["label"], summary, json.dumps(cc["files"]), kinds.get(h)))
             nconc += 1
+        for cc in extra:
+            conn.execute("INSERT INTO concerns (commit_hash, label, summary, files, kind, "
+                         "origin) VALUES (?,?,?,?,?,?)",
+                         (h, cc["label"], cc["summary"], json.dumps(cc["files"]),
+                          kinds.get(h), cc["origin"]))
+            nconc += 1
+            nimp += cc["origin"] == "import"
         mark_stage(conn, "untangle", h)
         done += 1
         if done % 500 == 0 or done == len(todo):
             conn.commit()
     conn.commit()
     log(f"  {nconc} concerns from {done} commits (avg {nconc / max(done, 1):.1f}/commit); "
-        f"routed {n_msg} message / {n_diff} diff")
-    return {"untangled": done, "concerns": nconc, "msg_routed": n_msg, "diff_routed": n_diff}
+        f"routed {n_msg} message / {n_diff} diff; {nimp} peek-labelled import families")
+    return {"untangled": done, "concerns": nconc, "msg_routed": n_msg, "diff_routed": n_diff,
+            "import_families": nimp}

@@ -81,7 +81,7 @@ def health(conn) -> dict:
     feats = conn.execute("SELECT id, name, status FROM domains "
                          "WHERE status IN ('named','provisional','confirmed')").fetchall()
     n_unassigned = conn.execute(
-        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL").fetchone()[0]
+        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc')").fetchone()[0]
     n_concerns = conn.execute("SELECT COUNT(*) FROM concerns WHERE label IS NOT NULL").fetchone()[0]
     src = Counter(r[0] for r in conn.execute(
         "SELECT assign_source FROM concerns WHERE domain_id IS NOT NULL"))

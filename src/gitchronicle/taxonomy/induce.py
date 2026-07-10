@@ -76,11 +76,14 @@ def facet_text(label: str, summary: str | None, files: list[str]) -> str:
 
 
 def load_facets(conn) -> tuple[list[int], dict[int, str], dict[int, dict]]:
-    """All labelled concerns → (ids, facet text, raw row info)."""
+    """All labelled concerns → (ids, facet text, raw row info). Vendored-drop/remainder
+    concerns (origin='import-misc') exist for completeness but are never clustered or
+    classified — their labels are containers, not capabilities."""
     ids, texts, info = [], {}, {}
     for r in conn.execute(
             "SELECT id, label, summary, files, commit_hash FROM concerns "
-            "WHERE label IS NOT NULL AND label != '' ORDER BY id"):
+            "WHERE label IS NOT NULL AND label != '' "
+            "AND (origin IS NULL OR origin != 'import-misc') ORDER BY id"):
         files = json.loads(r["files"] or "[]")
         ids.append(r["id"])
         texts[r["id"]] = facet_text(r["label"], r["summary"], files)

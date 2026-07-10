@@ -108,8 +108,11 @@ CREATE TABLE IF NOT EXISTS concerns (
     files       TEXT,          -- JSON array: the commit's files belonging to this concern
     kind        TEXT,          -- the commit's work-kind
     domain_id   INTEGER REFERENCES domains(id),  -- assigned by classification
-    assign_source TEXT,        -- how domain_id was set: fast|llm|propose|audit|human
-    assign_conf   REAL         -- classification confidence (cosine / margin)
+    assign_source TEXT,        -- how domain_id was set: fast|llm|novelty|propose|audit|human
+    assign_conf   REAL,        -- classification confidence (cosine / margin)
+    origin      TEXT           -- NULL = diff/msg untangle; import = peek-labelled family from
+                               -- a bulk commit; import-misc = vendored drop / remainder (never
+                               -- evidence, never injected into the glossary)
 );
 CREATE INDEX IF NOT EXISTS idx_concerns_commit ON concerns(commit_hash);
 CREATE INDEX IF NOT EXISTS idx_concerns_domain ON concerns(domain_id);
@@ -266,7 +269,10 @@ CREATE TABLE IF NOT EXISTS glossary (
     definition TEXT,
     stems      TEXT,               -- JSON array: census stems that evidence this entity
     evidence   TEXT,               -- JSON: {"docs": [...], "paths": [...]}
-    source     TEXT,               -- census|doc|both
+    source     TEXT,               -- census|doc|peek|import
+    tier       INTEGER DEFAULT 2,  -- evidence strength: 4=doc 3=code-peek 2=diff-labels 1=name.
+                                   -- Territory conflicts (entities claiming the same stems with
+                                   -- incompatible definitions) resolve to the higher tier.
     status     TEXT DEFAULT 'candidate'
 );
 
@@ -323,12 +329,16 @@ def init_db(conn: sqlite3.Connection) -> None:
     if "named_from" not in cols:
         conn.execute("ALTER TABLE domains ADD COLUMN named_from INTEGER")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(concerns)")}
-    for name, decl in (("summary", "TEXT"), ("assign_source", "TEXT"), ("assign_conf", "REAL")):
+    for name, decl in (("summary", "TEXT"), ("assign_source", "TEXT"), ("assign_conf", "REAL"),
+                       ("origin", "TEXT")):
         if name not in ccols:
             conn.execute(f"ALTER TABLE concerns ADD COLUMN {name} {decl}")
     scols = {r[1] for r in conn.execute("PRAGMA table_info(stem_census)")}
     if scols and "is_god" not in scols:
         conn.execute("ALTER TABLE stem_census ADD COLUMN is_god INTEGER DEFAULT 0")
+    gcols = {r[1] for r in conn.execute("PRAGMA table_info(glossary)")}
+    if gcols and "tier" not in gcols:
+        conn.execute("ALTER TABLE glossary ADD COLUMN tier INTEGER DEFAULT 2")
     conn.commit()
 
 

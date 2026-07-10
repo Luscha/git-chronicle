@@ -240,7 +240,7 @@ def run(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db
     from .taxonomy import pending_changeset, render_changeset
     changes = pending_changeset(conn)
     unassigned = conn.execute(
-        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL").fetchone()[0]
+        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc')").fetchone()[0]
     if changes:
         console.print("\n" + render_changeset(changes), markup=False, highlight=False)
     if unassigned:

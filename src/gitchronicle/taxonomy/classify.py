@@ -172,7 +172,7 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     ids_all, texts, info = load_facets(conn)
     vec = embed_facets(conn, provider, ids_all, texts, log)
     todo = [r["id"] for r in conn.execute(
-        "SELECT id FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL ORDER BY id")
+        "SELECT id FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc') ORDER BY id")
         if r["id"] in vec]
     fids, F = embed_definitions(conn, provider, rows)
     feat_line = {r["id"]: f"{r['id']}: {r['name']} — {(r['definition'] or '')[:200]}" for r in rows}
@@ -285,7 +285,7 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     if nones and not frozen:
         proposed = _propose_new(conn, provider, cfg, nones, info, names, run_id, log)
     unassigned = conn.execute(
-        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL").fetchone()[0]
+        "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc')").fetchone()[0]
 
     conn.execute(
         "UPDATE discovery_runs SET params=?, n_domains=? WHERE id=?",
