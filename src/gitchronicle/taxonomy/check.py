@@ -76,6 +76,29 @@ def orphan_stems(conn, min_concerns: int = 6) -> list[dict]:
     return out[:30]
 
 
+def territory_conflicts(conn) -> list[dict]:
+    """Feature pairs claiming overlapping stem territory — the split/near-dup signature
+    embedding cosine misses (Horse Riding System vs Horse Riding Mechanics). Review
+    hints only: same-territory features can be legitimately distinct (Skill Tree vs
+    Skills), so no automatic merging ever."""
+    from .ground import _norm_stems
+    feats = [(r["id"], r["name"], _norm_stems(set(json.loads(r["stems"] or "[]"))))
+             for r in conn.execute("SELECT id, name, stems FROM domains "
+                                   "WHERE status IN ('named','provisional','confirmed')")]
+    out = []
+    for i in range(len(feats)):
+        for j in range(i + 1, len(feats)):
+            a, b = feats[i], feats[j]
+            ov = a[2] & b[2]
+            # a single shared unigram is noise; identity needs a shared bigram or >=2 stems
+            if len(ov) >= 2 or any(" " in s for s in ov):
+                small = min(len(a[2]), len(b[2])) or 1
+                if len(ov) * 2 >= small:
+                    out.append({"a": a[1], "a_id": a[0], "b": b[1], "b_id": b[0],
+                                "shared": sorted(ov)[:4]})
+    return out[:40]
+
+
 def health(conn) -> dict:
     """The full health snapshot (also embedded in the inspect GUI)."""
     feats = conn.execute("SELECT id, name, status FROM domains "
@@ -116,6 +139,7 @@ def health(conn) -> dict:
         "incoherent_stems": len(incoherent),
         "orphan_stems": orphan_stems(conn),
         "near_dups": sorted(near_dups, key=lambda d: -d["cos"])[:20],
+        "territory_conflicts": territory_conflicts(conn),
     }
 
 
@@ -136,4 +160,9 @@ def print_health(conn, log=print) -> dict:
         f"{len(h['orphan_stems'])}")
     for o in h["orphan_stems"][:8]:
         log(f"  {o['n_concerns']:4}c {o['stem']:26} e.g. {', '.join(o['samples'])}")
+    log(f"feature territory conflicts (split/near-dup review hints): "
+        f"{len(h['territory_conflicts'])}")
+    for t in h["territory_conflicts"][:8]:
+        log(f"  [{t['a_id']}] {t['a'][:30]}  <->  [{t['b_id']}] {t['b'][:30]}"
+            f"  (shared: {', '.join(t['shared'])})")
     return h
