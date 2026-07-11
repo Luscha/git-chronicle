@@ -70,12 +70,16 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
         if parts[-1] == "__init__.py" and len(parts) >= 3:
             pkgroots.add("/".join(parts[:-1]))
     # a python package root is one module INCLUDING its subpackages (when compact)
+    sized = {r: [f for f in files if f.startswith(r + "/")] for r in pkgroots}
     for root in sorted(pkgroots):
-        if any(root.startswith(r + "/") for r in pkgroots if r != root):
-            continue                     # only top-level packages
-        dfs = [f for f in files if f.startswith(root + "/")]
-        if 3 <= len(dfs) <= 60:
-            units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
+        dfs = sized[root]
+        if not (3 <= len(dfs) <= 60):
+            continue
+        # maximal package under the cap: skip if a fitting ANCESTOR package exists
+        if any(root.startswith(r + "/") and 3 <= len(sized[r]) <= 60
+               for r in pkgroots if r != root):
+            continue
+        units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
     for d, dfs in bydir.items():
         base = d.rsplit("/", 1)[-1]
         if 3 <= len(dfs) <= 40 and base.lower() not in ("src", "include", "lib"):
@@ -140,13 +144,19 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             for j, (s, fs) in enumerate(part):
                 r = labels.get(str(j)) or {}
                 name = str((r.get("name") if isinstance(r, dict) else "") or "").strip()[:70]
+                stems = set()
+                for f in fs[:10]:
+                    stems |= path_stems(f)
                 if name and name.lower() != "inconclusive":
-                    stems = set()
-                    for f in fs[:10]:
-                        stems |= path_stems(f)
                     entries.append({"name": name, "tier": 3,
                                     "definition": str(r.get("definition") or "").strip()[:400],
                                     "files": fs, "stems": stems})
+                else:
+                    # files must never vanish: a tier-1 stub named from the stem keeps the
+                    # territory covered; review or later evidence can upgrade it
+                    stub = s.split(":", 1)[-1].split(" (")[0]
+                    entries.append({"name": stub[:70], "tier": 1,
+                                    "definition": "", "files": fs, "stems": stems})
             if i and i % 200 == 0:
                 log(f"    {i}/{len(items)} units peeked")
     finally:

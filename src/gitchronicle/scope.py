@@ -168,12 +168,16 @@ class Scope:
         return cls(inc, exc, ack)
 
     def __call__(self, path: str) -> bool:
-        """True when the path is IN scope (acknowledged subtrees are NOT analysed)."""
+        """True when the path is IN scope. Semantics: an explicit include wins (it can
+        carve a code pocket back out of an excluded tree), exclude/acknowledge carve out,
+        and everything the map never mentions is IN — silence must not exclude."""
+        if any(fnmatch.fnmatch(path, g) for g in self.includes if g != "**"):
+            return True
         if any(fnmatch.fnmatch(path, g) for g in self.excludes):
             return False
         if any(fnmatch.fnmatch(path, g) for g in self.acknowledges):
             return False
-        return any(fnmatch.fnmatch(path, g) for g in self.includes)
+        return True
 
     def exists(self) -> bool:
         return bool(self.excludes) or self.includes != ["**"]
