@@ -296,17 +296,6 @@ def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
 
 
 @app.command()
-def ground(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
-           force: bool = typer.Option(False, "--force", help="Rebuild census + glossary")):
-    """Build the repo-level evidence layer: stem census + doc harvest + feature glossary."""
-    from .taxonomy.ground import ground as ground_stage
-    cfg, conn = _setup(config, repo, rev, db)
-    _head("Ground")
-    provider = build_provider(cfg, conn)
-    ground_stage(conn, provider, cfg["repo"]["path"], cfg, log=_log, force=force)
-
-
-@app.command()
 def check(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Taxonomy health metrics: stem coherence, near-dups, confidence, coverage."""
     from .taxonomy.check import print_health

@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from ..storage import now_iso
-from .induce import _slug, embed_facets, load_facets
+from .facets import _slug, cluster_stems, embed_facets, load_facets
 
 
 
@@ -178,7 +178,6 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
         f"(k={k}, fast: margin>={fast_margin}, floor>={fast_floor}, stem_boost={stem_boost})")
     if not todo:
         _auto_confirm(conn, run_id, cat, log)
-        _rename_on_accretion(conn, provider, info, log)
         _post(conn, provider, log)
         return {"classified": 0, "features": len(fids), "unassigned": 0, "proposed": []}
 
@@ -274,10 +273,9 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     n_audit, freed = _audit(conn, provider, vec, info, cat, workers, log)
     nones += freed
 
-    # --- stage 4: NONE queue -> propose-new (skipped when frozen) ---
+    # --- stage 4: NONEs stay honestly unattributed (dead-feature candidates live in the
+    # batch-novelty pool; singleton minting is retired) ---
     proposed: list[dict] = []
-    if nones and not frozen:
-        proposed = _propose_new(conn, provider, cfg, nones, info, names, run_id, log)
     unassigned = conn.execute(
         "SELECT COUNT(*) FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc')").fetchone()[0]
 
@@ -286,8 +284,6 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
         (json.dumps({"k": k, "fast": n_fast, "llm": n_llm, "proposed": len(proposed),
                      "frozen": frozen}), len(fids), run_id))
     _auto_confirm(conn, run_id, cat, log)
-    if not frozen:
-        _rename_on_accretion(conn, provider, info, log)
     _post(conn, provider, log)
     return {"classified": n_fast + n_llm, "fast": n_fast, "llm": n_llm,
             "proposed": [p["name"] for p in proposed], "unassigned": unassigned,
@@ -299,7 +295,6 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
     """Cluster ambiguous facets; coherent clusters whose stems no existing feature owns
     become proposed features EN MASSE. Returns (created, remaining_ambiguous)."""
     from ..catalog.catalog import cluster_concerns
-    from .induce import cluster_stems, glossary_matches, _slug
     cat = cfg.get("catalog", {})
     novelty_min = int(cat.get("novelty_min", 4))
     cids = [cid for cid, _, _ in ambiguous]
@@ -336,11 +331,8 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
             cent /= (np.linalg.norm(cent) + 1e-9)
             if float((Fdef @ cent).max()) >= 0.80:     # semantically an existing feature
                 continue
-        gloss = glossary_matches(conn, stems)
-        gblock = "\n".join(f"- {g['name']} — {g['definition'][:100]}" for g in gloss)
         user = ("CHANGES:\n" + "\n".join(f"- {_ctx(info[c])}" for c in members[:14])
                 + f"\n\nSHARED STEMS: {', '.join(stems)}"
-                + ("\n\nGLOSSARY CANDIDATES:\n" + gblock if gblock else "")
                 + ("\n\nREJECTED names (NEVER use): " + ", ".join(sorted(tomb)) if tomb else ""))
         try:
             out = provider.chat(NOVELTY_SYS, user, want_json=True, large=True,
@@ -366,104 +358,6 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
     if created:
         log("  batch-novelty: " + ", ".join(f"{c['name']} ({c['n']})" for c in created))
     return created, [a for a in ambiguous if a[0] not in absorbed]
-
-
-def _rename_on_accretion(conn, provider, info, log) -> int:
-    """A provisional feature named from few members gets re-named once it has accumulated
-    enough that its founding change no longer represents it (the World Boss Duration
-    Management -> World Boss failure mode)."""
-    renamed = 0
-    for r in conn.execute(
-            "SELECT d.id, d.name, d.definition, d.stems, d.named_from, COUNT(c.id) n "
-            "FROM domains d JOIN concerns c ON c.domain_id=d.id "
-            "WHERE d.status='provisional' AND d.locked=0 AND d.named_from IS NOT NULL "
-            "GROUP BY d.id HAVING n >= 5 AND n >= 2*d.named_from").fetchall():
-        labels = [x["label"] for x in conn.execute(
-            "SELECT label FROM concerns WHERE domain_id=? LIMIT 12", (r["id"],))]
-        user = (f"CURRENT NAME: {r['name']}\nSHARED STEMS: "
-                f"{', '.join(json.loads(r['stems'] or '[]')[:8])}\n"
-                "MEMBER CHANGES:\n" + "\n".join(f"- {l}" for l in labels))
-        try:
-            out = provider.chat(RENAME_SYS, user, want_json=True, large=True,
-                                cache_extra=f"tax-rename:{r['id']}:{r['n']}")
-        except Exception:  # noqa: BLE001
-            continue
-        name = str((out.get("name") if isinstance(out, dict) else "") or "").strip()[:60]
-        if name and name.lower() != r["name"].lower():
-            from .induce import _slug
-            conn.execute("INSERT OR IGNORE INTO domain_aliases (domain_id, alias) VALUES (?,?)",
-                         (r["id"], r["name"]))
-            conn.execute("UPDATE domains SET name=?, slug=?, definition=?, named_from=? WHERE id=?",
-                         (name, _slug(name),
-                          str(out.get("definition") or r["definition"] or "").strip()[:500],
-                          r["n"], r["id"]))
-            log(f"  renamed on accretion: {r['name']} -> {name} ({r['n']} concerns)")
-            renamed += 1
-        else:
-            conn.execute("UPDATE domains SET named_from=? WHERE id=?", (r["n"], r["id"]))
-    conn.commit()
-    return renamed
-
-
-def _propose_new(conn, provider, cfg, nones, info, existing_names, run_id, log) -> list[dict]:
-    """Batch the none-fits into NEW provisional features. Tombstones are hard negatives."""
-    tomb = [r["name"] for r in conn.execute("SELECT name FROM taxonomy_tombstones")]
-    tombset = {t.lower() for t in tomb}
-    nameset = {n.lower(): did for did, n in existing_names.items()}
-    batch_n = int(cfg.get("catalog", {}).get("propose_batch", 30))
-    created: dict[str, int] = {}
-    out_features: list[dict] = []
-    for i in range(0, len(nones), batch_n):
-        batch = nones[i:i + batch_n]
-        user = ("EXISTING FEATURES (reuse = assign there):\n"
-                + "\n".join(f"- {n}" for n in sorted(existing_names.values()))[:4000]
-                + ("\n\nREJECTED names (NEVER propose):\n" + "\n".join(f"- {t}" for t in tomb)
-                   if tomb else "")
-                + "\n\nCHANGES:\n" + "\n".join(f"[{j}] {_ctx(info[c])}" for j, c in enumerate(batch)))
-        try:
-            out = provider.chat(PROPOSE_SYS, user, want_json=True, large=True,
-                                cache_extra=f"tax-new:{batch[0]}")
-        except Exception:  # noqa: BLE001
-            continue
-        for f in (out.get("features") or []) if isinstance(out, dict) else []:
-            name = str(f.get("name") or "").strip()[:60]
-            if not name or name.lower() in tombset:
-                continue
-            members = []
-            for j in (f.get("changes") or []):
-                try:
-                    members.append(batch[int(j)])
-                except (TypeError, ValueError, IndexError):
-                    continue
-            if not members:
-                continue
-            key = name.lower()
-            if key in nameset:                       # "new" name is an existing feature
-                did = nameset[key]
-            elif key in created:
-                did = created[key]
-            else:
-                from .induce import cluster_stems
-                stems = cluster_stems([info[c] for c in members])
-                did = conn.execute(
-                    "INSERT INTO domains (discovery_run_id, name, slug, definition, stems, "
-                    "named_from, classification, status, created_by) "
-                    "VALUES (?,?,?,?,?,?, 'feature','provisional','auto')",
-                    (run_id, name, _slug(name), str(f.get("definition") or "").strip()[:500],
-                     json.dumps(stems[:12]), len(members))).lastrowid
-                created[key] = did
-                out_features.append({"name": name, "id": did, "n": 0})
-            conn.executemany(
-                "UPDATE concerns SET domain_id=?, assign_source='propose' WHERE id=?",
-                [(did, c) for c in members])
-    conn.commit()
-    for f in out_features:
-        f["n"] = conn.execute("SELECT COUNT(*) FROM concerns WHERE domain_id=?",
-                              (f["id"],)).fetchone()[0]
-    if out_features:
-        log(f"  proposed {len(out_features)} provisional features: "
-            + ", ".join(f"{f['name']} ({f['n']})" for f in out_features))
-    return out_features
 
 
 def _audit(conn, provider, vec, info, cat, workers, log) -> tuple[int, list[int]]:
@@ -585,20 +479,18 @@ def rollups(conn) -> None:
 
 def build_taxonomy(conn, provider, cfg: dict, git_head: str | None, rev_range: str,
                    log=print) -> dict:
-    """Catalog entry point for method='taxonomy': ground + induce once, classify always."""
-    from .ground import build_census, ground
-    from .induce import induce
+    """Catalog entry point (v0.1): the register (from the worktree) is the label space;
+    history is classified against it. Census refreshes locally each run (god stems)."""
+    from .ground import build_census
+    from .register import build_register
     cat = cfg.get("catalog", {})
-    repo = cfg.get("repo", {}).get("path", ".")
-    ground(conn, provider, repo, cfg, log, force=bool(cat.get("reground")))
-    # the census itself is refreshed every run (local, seconds) so batch-novelty always
-    # sees the stems of NEWLY-ARRIVED files even when the glossary is untouched
     build_census(conn, top_n=int(cat.get("census_top", 800)))
-    r1 = induce(conn, provider, cfg, git_head, rev_range, log, force=bool(cat.get("reinduce")))
+    r1 = build_register(conn, provider, cfg.get("repo", {}).get("path", "."), cfg, log,
+                        force=bool(cat.get("reregister")))
     r2 = classify(conn, provider, cfg, git_head, rev_range,
                   frozen=bool(cat.get("frozen")), force=bool(cat.get("reclassify")), log=log)
     n_feat = conn.execute("SELECT COUNT(*) FROM domains "
                           "WHERE status IN ('named','provisional','confirmed')").fetchone()[0]
     log(f"  {n_feat} features")
     return {"domains": n_feat, **{k: v for k, v in r2.items() if k != "features"},
-            "induced": r1.get("induced", 0)}
+            "register": r1.get("register", 0)}

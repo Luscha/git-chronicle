@@ -26,7 +26,7 @@ from ..extract.git_ingest import BatchReader, run_git
 from ..scope import Scope
 from ..storage import now_iso
 from .ground import _norm_stems, harvest_docs, path_stems
-from .induce import _slug
+from .facets import _slug
 
 REGISTER_PEEK_SYS = (
     "You identify the FEATURES and SUBSYSTEMS of ONE software project from its current "
