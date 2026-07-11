@@ -62,10 +62,20 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
     # luna/ is one framework even when its files family by inner basenames): add an
     # umbrella unit per compact directory subtree
     bydir: dict[str, list[str]] = defaultdict(list)
+    pkgroots: set = set()
     for f in files:
         parts = f.split("/")
         if len(parts) >= 3:
             bydir["/".join(parts[:-1])].append(f)
+        if parts[-1] == "__init__.py" and len(parts) >= 3:
+            pkgroots.add("/".join(parts[:-1]))
+    # a python package root is one module INCLUDING its subpackages (when compact)
+    for root in sorted(pkgroots):
+        if any(root.startswith(r + "/") for r in pkgroots if r != root):
+            continue                     # only top-level packages
+        dfs = [f for f in files if f.startswith(root + "/")]
+        if 3 <= len(dfs) <= 60:
+            units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
     for d, dfs in bydir.items():
         base = d.rsplit("/", 1)[-1]
         if 3 <= len(dfs) <= 40 and base.lower() not in ("src", "include", "lib"):
@@ -117,7 +127,8 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             blocks = []
             for j, (s, fs) in enumerate(part):
                 rep = _representative(repo, "HEAD", s.split(" (")[0], fs, reader=reader)
-                head = reader.read("HEAD", rep, limit=_CODE_HEAD)
+                depth = _CODE_HEAD * 3 if s.startswith(("solo:", "pkg:")) else _CODE_HEAD
+                head = reader.read("HEAD", rep, limit=depth)
                 blocks.append(f"[{j}] module '{s}' ({rep.rsplit('/', 1)[-1]}, "
                               f"{len(fs)} files):\n{head}")
             try:
@@ -144,9 +155,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
 
     # docs (scoped) are the highest evidence tier — the repo describing itself
     docdirs: dict[str, list[dict]] = defaultdict(list)
-    for d in harvest_docs(repo):
-        if not scope(d["path"]):
-            continue
+    for d in harvest_docs(repo, scope=scope):
         parts = d["path"].split("/")
         if len(parts) >= 3 and parts[0].lower() in ("doc", "docs"):
             docdirs[parts[1]].append(d)
@@ -196,8 +205,10 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 home.update(name=e["name"], definition=e["definition"], tier=e["tier"])
     log(f"  {len(merged)} entries after territory merge")
 
+    protected = [m for m in merged if m["tier"] >= 4]
+    merged = [m for m in merged if m["tier"] < 4]
     merged.sort(key=lambda m: (sorted(m["stems"] - god)[:1] or ["~"])[0])
-    final: list[dict] = []
+    final: list[dict] = list(protected)
     for i in range(0, len(merged), 120):
         part = merged[i:i + 120]
         listing = "\n".join(f"{j}: {m['name']} — {m['definition'][:90]}"

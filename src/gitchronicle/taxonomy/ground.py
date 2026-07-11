@@ -115,12 +115,16 @@ def build_census(conn, top_n: int = 800, min_concerns: int = 3, scope=None) -> i
 _DOC_RE = re.compile(r"\.(md|rst|txt)$", re.I)
 
 
-def harvest_docs(repo: str, max_docs: int = 120, excerpt_lines: int = 30) -> list[dict]:
-    """Titles + excerpts of in-repo prose at HEAD — the repo describing itself."""
+def harvest_docs(repo: str, max_docs: int = 160, excerpt_lines: int = 30,
+                 scope=None) -> list[dict]:
+    """Titles + excerpts of in-repo prose at HEAD — the repo describing itself.
+    Scope-filtered BEFORE the cap, so excluded trees can't starve real design docs."""
     out = []
     for path in run_git(repo, ["ls-files"]).splitlines():
         p = path.strip()
         if not _DOC_RE.search(p):
+            continue
+        if scope is not None and not scope(p):
             continue
         low = p.lower()
         if not (low.startswith(("doc/", "docs/", "wiki/")) or "readme" in low
