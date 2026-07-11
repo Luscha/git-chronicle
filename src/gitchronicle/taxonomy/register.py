@@ -148,6 +148,12 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 for f in fs[:10]:
                     stems |= path_stems(f)
                 if name and name.lower() != "inconclusive":
+                    # a coined unit identifier (uchtml, luna) is the owner's own name for
+                    # the thing — it must survive generic relabeling, in stems and name
+                    key = s.split(":", 1)[-1].split(" (")[0]
+                    stems.add(key)
+                    if len(key) >= 5 and " " not in key and key.lower() not in name.lower():
+                        name = f"{name} ({key})"[:70]
                     entries.append({"name": name, "tier": 3,
                                     "definition": str(r.get("definition") or "").strip()[:400],
                                     "files": fs, "stems": stems})

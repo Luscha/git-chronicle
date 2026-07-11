@@ -141,6 +141,7 @@ def _stem_families(paths):
     out = {}
     for s, fs in fam.items():
         if len(fs) < _FAMILY_MIN:
+            leftover += fs          # a size-1 bucket must fall back, never vanish
             continue
         dirs = {f.rsplit("/", 1)[0] if "/" in f else "" for f in fs}
         if len(fs) >= 6 and len(dirs) / len(fs) >= 0.8:   # scaffold dispersion signature
