@@ -6,6 +6,8 @@
      `exclude:` glob. Review the drafted verdicts — the evidence for each is
      in the comment. Scope edits re-run analysis for affected commits. -->
 
+- include: Locale/italy/quest/**
+- include: Locale/italy/libs/**
 - exclude: Locale/**    <!-- 20559 files, 43161 touches, 2019-01-03→2026-07-06, exts svn-base,msa,quest,txt (repo-overlap 0.88) -->
 - exclude: Locale/data/**    <!-- 18420 files, 30771 touches, 2019-01-03→2026-07-04, exts svn-base,msa,msm,txt (repo-overlap 0.95) -->
 - exclude: Extern-Server/Extern/**    <!-- 13345 files, 28199 touches, 2020-07-22→2024-02-01 (gone from worktree), exts hpp,h,cpp,ipp (repo-overlap 0.97) -->

@@ -58,6 +58,28 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
     files = [p for p in files if "." in p and p.rsplit(".", 1)[-1].lower() in code_exts]
     fams, leftover = _stem_families(files)
     units: dict[str, list[str]] = {}
+    # cohesive small directories are modules in their own right (a python package like
+    # luna/ is one framework even when its files family by inner basenames): add an
+    # umbrella unit per compact directory subtree
+    bydir: dict[str, list[str]] = defaultdict(list)
+    for f in files:
+        parts = f.split("/")
+        if len(parts) >= 3:
+            bydir["/".join(parts[:-1])].append(f)
+    for d, dfs in bydir.items():
+        base = d.rsplit("/", 1)[-1]
+        if 3 <= len(dfs) <= 40 and base.lower() not in ("src", "include", "lib"):
+            units[f"dir:{base}"] = dfs
+    # significant singletons: a lone file with a specific stem is still a module
+    from .ground import path_stems as _ps
+    kept_leftover = []
+    for f in leftover:
+        st = sorted(_ps(f), key=len, reverse=True)
+        if st and len(f.rsplit("/", 1)[-1]) >= 8:
+            units[f"solo:{st[0]}"] = [f]
+        else:
+            kept_leftover.append(f)
+    leftover = kept_leftover
     for s, fs in fams.items():
         if len(fs) <= _UNIT_MAX:
             units[s] = fs
@@ -121,16 +143,28 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
     log(f"  {len(entries)} units labelled")
 
     # docs (scoped) are the highest evidence tier — the repo describing itself
+    docdirs: dict[str, list[dict]] = defaultdict(list)
     for d in harvest_docs(repo):
         if not scope(d["path"]):
             continue
+        parts = d["path"].split("/")
+        if len(parts) >= 3 and parts[0].lower() in ("doc", "docs"):
+            docdirs[parts[1]].append(d)
         title = d["title"].strip()
-        if not (6 <= len(title) <= 60) or title.lower().endswith((".md", ".txt")):
+        if not (4 <= len(title) <= 60) or title.lower().endswith((".md", ".txt")):
             continue
         entries.append({"name": title[:70], "tier": 4,
                         "definition": d["excerpt"].replace("\n", " ")[:400],
                         "files": [d["path"]],
                         "stems": path_stems(d["path"])})
+    # Doc/<name>/ subtrees document one system by that name — the strongest naming signal
+    for sub, docs in docdirs.items():
+        if len(docs) >= 2:
+            entries.append({"name": sub[:70], "tier": 4,
+                            "definition": ("documented system: "
+                                           + "; ".join(x["title"] for x in docs[:5]))[:400],
+                            "files": [x["path"] for x in docs],
+                            "stems": set().union(*(path_stems(x["path"]) for x in docs))})
 
     # acknowledged subtrees: one entry each, never decomposed
     god = {r["stem"] for r in conn.execute("SELECT stem FROM stem_census WHERE is_god=1")}
