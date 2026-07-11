@@ -15,7 +15,7 @@
 - exclude: Client-Files/locale/**    <!-- 1123 files, 5665 touches, 2019-01-22→2026-07-04, exts txt,html,py,yaml (repo-overlap 0.54) -->
 - exclude: thirdparty/python3/**    <!-- 4905 files, 4905 touches, 2025-12-27→2025-12-27, exts py,h,rst,c (repo-overlap 0.72) -->
 - exclude: thirdparty/bgfx/**    <!-- 4005 files, 4009 touches, 2024-04-13→2026-06-20, exts txt,h,cpp,bin (repo-overlap 0.69), ecosystem markers -->
-- exclude: Web-Sites/CCC/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
+- acknowledge: Web-Sites/CCC/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
 - exclude: Web-Sites/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
 - exclude: thirdparty/python/**    <!-- 1704 files, 2607 touches, 2024-04-13→2026-06-20, exts c,h,pyc,py (repo-overlap 0.73) -->
 - exclude: thirdparty/cython/**    <!-- 2124 files, 2124 touches, 2024-04-13→2024-05-16, exts pyx,py,pxd,srctree (repo-overlap 0.18), ecosystem markers -->
@@ -69,24 +69,14 @@
 
 ## Charter
 
-<!-- Owner knowledge the repository cannot express — plain sentences, consumed ONLY by
-     the feature-naming stages (never per-commit analysis, never assignment picks).
-     Statements that work:
-       - "<X> and <Y> are one feature"
-       - "<X> and <Y> are distinct features, never merge them"
-       - "UI windows/screens belong to the feature they serve"
-       - one or two lines describing what this project IS -->
+Metin2-derived MMO game: C++ game server, C++/Python client, launcher, world editor
+tooling. Features are gameplay capabilities and their supporting engine systems.
 
-(describe the project here)
-
-<!-- the census found related vocabulary that may need a ruling —
-     one sentence each turns a guess into a rule: -->
-<!-- python: python network, python player, python library, python application, python item -->
-<!-- player: player, player input, player skill -->
-<!-- char: char item, char state, char manager -->
-<!-- tree: tree library, tree forest, tree wrapper -->
-<!-- wiki: wiki, wiki config, wiki render -->
-<!-- image: image, image library, image instance -->
-<!-- frame: frame, frame context, frame eval -->
-<!-- test: test compiler, test high, test scripts -->
-<!-- quest: quest three, quest skipia, quest desert, quest snow, quest spider -->
+- Item prototypes, item stats, item bonuses and item attributes are ONE feature: the
+  item system. Do not split them.
+- Horse riding, horse mechanics and horse skills are ONE feature.
+- Skills and Skill Tree are DISTINCT features; never merge them.
+- UI windows, panels and screens belong to the feature they serve (a skill tree window
+  is part of Skill Tree); only reusable UI building blocks used by many features stand
+  alone as UI framework components.
+- Raids, dungeons and world bosses are separate features unless the code says otherwise.

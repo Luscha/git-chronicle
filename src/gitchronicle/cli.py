@@ -311,6 +311,18 @@ def init_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str 
                   "Next: [bold]gitchronicle run[/]")
 
 
+@app.command(name="register")
+def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+                 force: bool = typer.Option(False, "--force", help="Rebuild the register")):
+    """Build the feature register from the CURRENT worktree (scoped): module units ->
+    code-peek labels -> territory merge. History never decides identity."""
+    from .taxonomy.register import build_register
+    cfg, conn = _setup(config, repo, rev, db)
+    _head("Register")
+    provider = build_provider(cfg, conn)
+    build_register(conn, provider, cfg["repo"]["path"], cfg, log=_log, force=force)
+
+
 @app.command()
 def ground(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
            force: bool = typer.Option(False, "--force", help="Rebuild census + glossary")):

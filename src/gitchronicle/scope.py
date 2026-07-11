@@ -143,28 +143,35 @@ def draft_scope(repo: str, md_path: str | Path = MD_FILE) -> str:
 
 
 class Scope:
-    """Parsed runtime filter. The ONLY authority on what the pipeline sees."""
+    """Parsed runtime filter. The ONLY authority on what the pipeline sees.
+    Verdicts: include (analysed), exclude (invisible), acknowledge (owned sub-product:
+    catalogued as ONE feature, its internals never analysed)."""
 
-    def __init__(self, includes: list[str], excludes: list[str]):
+    def __init__(self, includes: list[str], excludes: list[str],
+                 acknowledges: list[str] | None = None):
         self.includes = includes or ["**"]
         self.excludes = excludes
+        self.acknowledges = acknowledges or []
 
     @classmethod
     def load(cls, md_path: str | Path = MD_FILE) -> "Scope":
         p = Path(md_path)
-        inc, exc = [], []
+        inc, exc, ack = [], [], []
         if p.exists():
             m = re.search(r"## Scope.*?(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
             for ln in (m.group(0) if m else "").splitlines():
                 ln = re.sub(r"<!--.*?-->", "", ln).strip()
-                mm = re.match(r"-\s*(include|exclude):\s*(\S+)", ln)
+                mm = re.match(r"-\s*(include|exclude|acknowledge):\s*(\S+)", ln)
                 if mm:
-                    (inc if mm.group(1) == "include" else exc).append(mm.group(2))
-        return cls(inc, exc)
+                    {"include": inc, "exclude": exc,
+                     "acknowledge": ack}[mm.group(1)].append(mm.group(2))
+        return cls(inc, exc, ack)
 
     def __call__(self, path: str) -> bool:
-        """True when the path is IN scope."""
+        """True when the path is IN scope (acknowledged subtrees are NOT analysed)."""
         if any(fnmatch.fnmatch(path, g) for g in self.excludes):
+            return False
+        if any(fnmatch.fnmatch(path, g) for g in self.acknowledges):
             return False
         return any(fnmatch.fnmatch(path, g) for g in self.includes)
 
