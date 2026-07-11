@@ -296,6 +296,16 @@ def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
 
 
 @app.command()
+def dossier(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+            out: str = typer.Option("dossiers", "--out", help="Output directory")):
+    """Export per-feature dossier bundles (md+json with commit citations) + journey index."""
+    from .serve.dossier import export_dossiers
+    cfg, conn = _setup(config, repo, rev, db)
+    _head("Dossiers")
+    export_dossiers(conn, out, log=_log)
+
+
+@app.command()
 def relations(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Infer built-on/uses edges between register features from static imports (local)."""
     from .taxonomy.relations import build_relations
