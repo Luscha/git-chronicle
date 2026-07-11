@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..extract.git_ingest import BatchReader, run_git
-from ..scope import Scope, load_charter  # noqa: F401  (Scope for filtering)
+from ..scope import Scope
 from ..storage import now_iso
 from .ground import _norm_stems, harvest_docs, path_stems
 from .induce import _slug
@@ -85,9 +85,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
 
     # peek-label every unit at HEAD
     from ..untangle.untangle import _representative
-    charter = load_charter(md)
-    cblock = (f"OWNER CHARTER (project knowledge - follow where relevant):\n{charter}\n\n"
-              if charter else "")
+    cblock = ""
     reader = BatchReader(repo)
     entries: list[dict] = []
     try:

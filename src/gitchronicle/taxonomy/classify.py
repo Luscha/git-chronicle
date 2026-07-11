@@ -28,18 +28,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
-from ..scope import load_charter
 from ..storage import now_iso
 from .induce import _slug, embed_facets, load_facets
 
 
-def _charter_block() -> str:
-    """Owner charter prefix for label-space calls (naming/novelty/propose/rename) —
-    never per-concern classification, never untangle."""
-    c = load_charter()
-    if not c:
-        return ""
-    return "OWNER CHARTER (project knowledge - follow where relevant):\n" + c + "\n\n"
 
 CLASSIFY_SYS = (
     "You classify code changes into a software project's existing FEATURES. The FEATURES "
@@ -346,8 +338,7 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
                 continue
         gloss = glossary_matches(conn, stems)
         gblock = "\n".join(f"- {g['name']} — {g['definition'][:100]}" for g in gloss)
-        user = (_charter_block()
-                + "CHANGES:\n" + "\n".join(f"- {_ctx(info[c])}" for c in members[:14])
+        user = ("CHANGES:\n" + "\n".join(f"- {_ctx(info[c])}" for c in members[:14])
                 + f"\n\nSHARED STEMS: {', '.join(stems)}"
                 + ("\n\nGLOSSARY CANDIDATES:\n" + gblock if gblock else "")
                 + ("\n\nREJECTED names (NEVER use): " + ", ".join(sorted(tomb)) if tomb else ""))
@@ -389,7 +380,7 @@ def _rename_on_accretion(conn, provider, info, log) -> int:
             "GROUP BY d.id HAVING n >= 5 AND n >= 2*d.named_from").fetchall():
         labels = [x["label"] for x in conn.execute(
             "SELECT label FROM concerns WHERE domain_id=? LIMIT 12", (r["id"],))]
-        user = (_charter_block() + f"CURRENT NAME: {r['name']}\nSHARED STEMS: "
+        user = (f"CURRENT NAME: {r['name']}\nSHARED STEMS: "
                 f"{', '.join(json.loads(r['stems'] or '[]')[:8])}\n"
                 "MEMBER CHANGES:\n" + "\n".join(f"- {l}" for l in labels))
         try:
@@ -424,7 +415,7 @@ def _propose_new(conn, provider, cfg, nones, info, existing_names, run_id, log) 
     out_features: list[dict] = []
     for i in range(0, len(nones), batch_n):
         batch = nones[i:i + batch_n]
-        user = (_charter_block() + "EXISTING FEATURES (reuse = assign there):\n"
+        user = ("EXISTING FEATURES (reuse = assign there):\n"
                 + "\n".join(f"- {n}" for n in sorted(existing_names.values()))[:4000]
                 + ("\n\nREJECTED names (NEVER propose):\n" + "\n".join(f"- {t}" for t in tomb)
                    if tomb else "")

@@ -25,7 +25,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..extract.git_ingest import run_git
-from ..scope import load_charter
 
 # generic path words that can never evidence a feature by themselves (kept as unigram
 # stopwords only — they still appear inside bigrams like "guild war")
@@ -257,8 +256,7 @@ def draft_glossary(conn, provider, repo: str, cfg: dict, log=print) -> int:
     # Two SEPARATE evidence passes. Mixing them fails in a measured way: rich doc prose
     # dominates attention and every census chunk returns only the doc entities, mining
     # zero from the stems. Docs are mined once; census chunks are mined alone.
-    _c = load_charter()
-    charter = ("OWNER CHARTER (project knowledge - follow where relevant):\n" + _c + "\n\n") if _c else ""
+    charter = ""
     drafts = []
 
     def _collect(out, tier):
