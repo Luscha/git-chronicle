@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS domain_files (
     domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
     path      TEXT NOT NULL,
     weight    REAL,                  -- centrality of this file to the domain
+    source    TEXT NOT NULL DEFAULT 'history',  -- 'register' = worktree territory (authoritative), 'history' = derived from attributed commits
     PRIMARY KEY (domain_id, path)
 );
 CREATE INDEX IF NOT EXISTS idx_domain_files_domain ON domain_files(domain_id);

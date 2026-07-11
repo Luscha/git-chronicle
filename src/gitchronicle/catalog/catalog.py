@@ -382,11 +382,14 @@ def _derive_files(conn):
         for f in files:
             df[f] += 1
     n_dom = max(1, len(raw))
-    conn.execute("DELETE FROM domain_files")
+    # register rows are worktree truth — only the history-derived layer is rebuilt here
+    conn.execute("DELETE FROM domain_files WHERE source='history'")
     for did, files in raw.items():
         rows = []
         for f, k in files.items():
             idf = math.log((n_dom + 1) / (df[f] + 1)) + 1e-3
             rows.append((did, f, float(k) * idf))
-        conn.executemany("INSERT OR REPLACE INTO domain_files (domain_id, path, weight) VALUES (?,?,?)", rows)
-        conn.execute("UPDATE domains SET n_files=? WHERE id=?", (len(files), did))
+        conn.executemany("INSERT INTO domain_files (domain_id, path, weight, source) VALUES (?,?,?,'history') "
+                         "ON CONFLICT(domain_id, path) DO NOTHING", rows)
+    for r in conn.execute("SELECT domain_id, COUNT(*) n FROM domain_files GROUP BY domain_id").fetchall():
+        conn.execute("UPDATE domains SET n_files=? WHERE id=?", (r[1], r[0]))

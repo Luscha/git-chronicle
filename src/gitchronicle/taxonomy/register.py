@@ -279,8 +279,8 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             "VALUES (?,?,?,?,?,?, 'feature','named','auto')",
             (run_id, e["name"], _slug(e["name"]), e["definition"],
              json.dumps(sorted(e["stems"] - god)[:12]), len(e["files"]))).lastrowid
-        conn.executemany("INSERT OR REPLACE INTO domain_files (domain_id, path, weight) "
-                         "VALUES (?,?,1.0)", [(did, f) for f in e["files"][:400]])
+        conn.executemany("INSERT OR REPLACE INTO domain_files (domain_id, path, weight, source) "
+                         "VALUES (?,?,1.0,'register')", [(did, f) for f in e["files"][:400]])
         n += 1
     conn.commit()
     log(f"  register: {n} features written")

@@ -19,7 +19,7 @@ from .imports import extract_import_refs
 
 _MAX_FILES_PER_FEATURE = 80    # territory files read per feature (by weight)
 _MIN_EDGE_FILES = 2            # distinct importing files needed to assert an edge
-_HUB_SHARE = 0.25              # used by >=25% of features => framework hub
+_HUB_MIN_FANIN = 5             # used by >=5 other features => framework hub
 
 
 def build_relations(conn, repo: str, log=print) -> dict:
@@ -29,15 +29,20 @@ def build_relations(conn, repo: str, log=print) -> dict:
         log("  no register — run `gitchronicle register` first")
         return {"edges": 0}
 
-    # file -> owning feature (max weight; files claimed by many features are ambiguous glue)
+    # file -> owning feature: register territory (worktree truth) beats history-derived
+    # weight; files claimed by many features are ambiguous glue and own nothing
     claims: dict[str, list] = defaultdict(list)
-    for r in conn.execute("SELECT domain_id, path, weight FROM domain_files"):
+    for r in conn.execute("SELECT domain_id, path, weight, source FROM domain_files"):
         if r["domain_id"] in feats:
-            claims[r["path"]].append((r["weight"] or 0, r["domain_id"]))
+            claims[r["path"]].append(
+                (1 if r["source"] == "register" else 0, r["weight"] or 0, r["domain_id"]))
     owner: dict[str, int] = {}
     for path, cs in claims.items():
-        if len(cs) <= 3:                       # glue owned by everyone owns nothing
-            owner[path] = max(cs)[1]
+        reg = [c for c in cs if c[0] == 1]
+        if len(reg) == 1:
+            owner[path] = reg[0][2]
+        elif not reg and len(cs) <= 3:
+            owner[path] = max(cs)[2]
     by_base: dict[str, list[int]] = defaultdict(list)
     for path, did in owner.items():
         base = path.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
@@ -79,9 +84,8 @@ def build_relations(conn, repo: str, log=print) -> dict:
 
     # framework hubs: heavily-used features carry the 'built-on' narrative
     hubs = []
-    threshold = max(3, int(len(per_feat_files) * _HUB_SHARE))
     for did, cnt in used_by.most_common():
-        if cnt >= threshold:
+        if cnt >= _HUB_MIN_FANIN:
             conn.execute("UPDATE domains SET classification='core', fan_in=? WHERE id=?",
                          (cnt, did))
             hubs.append((feats[did], cnt))
