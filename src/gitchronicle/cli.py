@@ -296,6 +296,15 @@ def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
 
 
 @app.command()
+def relations(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
+    """Infer built-on/uses edges between register features from static imports (local)."""
+    from .taxonomy.relations import build_relations
+    cfg, conn = _setup(config, repo, rev, db)
+    _head("Relations")
+    build_relations(conn, cfg["repo"]["path"], log=_log)
+
+
+@app.command()
 def check(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Taxonomy health metrics: stem coherence, near-dups, confidence, coverage."""
     from .taxonomy.check import print_health
