@@ -38,6 +38,12 @@ header nav button.on { background:var(--acc); border-color:var(--acc); color:#ff
 #app { display:grid; grid-template-columns:320px 1fr; height:calc(100vh - 49px) }
 aside { border-right:1px solid var(--line); background:var(--side);
   display:flex; flex-direction:column; min-height:0 }
+#vbox { border-top:1px solid var(--line); padding:6px }
+#vbox summary { color:var(--muted); font-size:13px; cursor:pointer; padding:4px }
+#vbox ul { list-style:none; max-height:30vh; overflow-y:auto }
+#vbox li { padding:5px 10px; border-radius:6px; cursor:pointer; font-size:13.5px;
+  color:var(--muted) }
+#vbox li:hover { background:var(--chip) }
 #q { margin:10px; padding:7px 10px; border:1px solid var(--line); border-radius:6px;
   background:var(--bg); color:var(--fg); font-size:14px }
 #list { list-style:none; overflow-y:auto; flex:1; padding:0 6px 12px }
@@ -90,6 +96,7 @@ table.commits td:nth-child(2) { color:var(--muted); white-space:nowrap }
   <aside>
     <input id="q" type="search" placeholder="Search features&hellip;" autocomplete="off">
     <ul id="list"></ul>
+    <details id="vbox"><summary id="vsum"></summary><ul id="vlist"></ul></details>
   </aside>
   <main id="main"></main>
 </div>
@@ -107,23 +114,33 @@ function el(tag, cls, text) {
 }
 let view = "features";
 
+function itemLi(r, cur) {
+  const li = el("li", r.slug === cur ? "on" : "");
+  li.append((r.used_by.length >= 5 ? "⭐ " : "") + r.name);
+  const bits = [];
+  if (r.classification === "doc-only") bits.push("doc-only");
+  if (r.commits.length) bits.push(r.commits.length + " commits");
+  if (r.chapters.length) bits.push(r.chapters.length + " chapters");
+  if (!bits.length) bits.push("register only");
+  li.append(el("small", "", bits.join(" · ")));
+  li.onclick = () => { location.hash = r.slug; };
+  return li;
+}
+
 function renderList() {
   const q = $("q").value.trim().toLowerCase();
   const ul = $("list"); ul.textContent = "";
+  const vul = $("vlist"); vul.textContent = "";
   const cur = location.hash.slice(1);
+  let nv = 0;
   for (const r of DATA) {
     if (q && !(r.name.toLowerCase().includes(q) || r.definition.toLowerCase().includes(q)))
       continue;
-    const li = el("li", r.slug === cur ? "on" : "");
-    li.append((r.used_by.length >= 5 ? "⭐ " : "") + r.name);
-    const bits = [];
-    if (r.commits.length) bits.push(r.commits.length + " commits");
-    if (r.chapters.length) bits.push(r.chapters.length + " chapters");
-    if (!bits.length) bits.push("register only");
-    li.append(el("small", "", bits.join(" · ")));
-    li.onclick = () => { location.hash = r.slug; };
-    ul.append(li);
+    if (r.classification === "vendored") { vul.append(itemLi(r, cur)); nv++; }
+    else ul.append(itemLi(r, cur));
   }
+  $("vsum").textContent = "Third-party (" + nv + ")";
+  $("vbox").style.display = nv ? "" : "none";
 }
 
 function chipRow(parent, label, items, dir) {
@@ -144,7 +161,9 @@ function chipRow(parent, label, items, dir) {
 
 function renderFeature(r) {
   const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", (r.used_by.length >= 5 ? "⭐ " : "") + r.name));
+  m.append(el("h2", "", (r.used_by.length >= 5 ? "⭐ " : "") + r.name
+    + (r.classification === "vendored" ? "  ·  third-party" :
+       r.classification === "doc-only" ? "  ·  doc-only" : "")));
   if (r.definition) m.append(el("div", "def", r.definition));
   if (r.summary && r.summary !== r.definition) m.append(el("div", "sum", r.summary));
   chipRow(m, "Uses", r.uses, "out");
@@ -188,7 +207,7 @@ function renderJourney() {
   const m = $("main"); m.textContent = "";
   m.append(el("h2", "", "Feature journey"));
   m.append(el("p", "sum", "Features by first attributed commit; ⭐ = framework hub."));
-  const dated = DATA.filter(r => r.commits.length)
+  const dated = DATA.filter(r => r.commits.length && r.classification !== "vendored")
     .map(r => [r.commits[0].date, r]).sort((a, b) => a[0] < b[0] ? -1 : 1);
   let year = "";
   for (const [d, r] of dated) {
