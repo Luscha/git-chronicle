@@ -103,6 +103,108 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
     return units, leftover
 
 
+_DOC_IDENT_RE = re.compile(
+    r"`([A-Za-z_][\w./:]{3,60})`"                       # code spans
+    r"|\b([a-z]+(?:_[a-z0-9]+)+)\b"                     # snake_case
+    r"|\b([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+)\b")        # CamelCase
+
+
+def _doc_idents(text: str, code_stems: set) -> set:
+    """Identifiers a doc's CONTENT uses that exist in the code — the corroboration
+    bridge that lets 'Player Virtualization' (doc name) meet uiAvatarBuilder (code)."""
+    cands: set[str] = set()
+    for m in _DOC_IDENT_RE.finditer(text or ""):
+        if m.group(1):
+            for part in re.split(r"[./:]", m.group(1)):
+                if len(part) >= 4:
+                    cands.add(part.lower())
+                    cands.add(part.lower().replace("_", " "))
+        else:
+            tok = m.group(2) or m.group(3)
+            cands.add(tok.lower().replace("_", ""))
+            cands.add(re.sub(r"[_]+", " ", tok.lower()).strip())
+            words = re.findall(r"[A-Z][a-z0-9]+", tok)
+            if len(words) >= 2:
+                cands.add(" ".join(w.lower() for w in words))
+    return {c for c in cands if len(c) >= 4 and c in code_stems}
+
+
+def _alias_pass(provider, final: list[dict], keep_key, log) -> list[dict]:
+    import numpy as np
+    cand = [(i, m) for i, m in enumerate(final) if not m.get("ack")]
+    if len(cand) < 2:
+        return final
+    texts = [f"{m['name']}. {(m['definition'] or '')[:200]}" for _, m in cand]
+    V = provider.embed(texts)
+    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
+    S = V @ V.T
+    np.fill_diagonal(S, 0)
+    pairs = []
+    for a in range(len(cand)):
+        b = int(np.argmax(S[a]))
+        if a < b and S[a, b] >= 0.85:
+            pairs.append((float(S[a, b]), a, b))
+    pairs = sorted(pairs, reverse=True)[:120]
+    if not pairs:
+        log("  alias pass: no candidate pairs")
+        return final
+    same: list[tuple[int, int]] = []
+    for i in range(0, len(pairs), 20):
+        chunk = pairs[i:i + 20]
+        listing = "\n".join(
+            f"[{j}] {cand[a][1]['name']} — {(cand[a][1]['definition'] or '')[:110]}\n"
+            f"    VS {cand[b][1]['name']} — {(cand[b][1]['definition'] or '')[:110]}"
+            for j, (_, a, b) in enumerate(chunk))
+        try:
+            out = provider.chat(
+                "Each numbered item shows TWO catalog entries from ONE software project. "
+                "Answer which numbers describe THE SAME feature (one capability under two "
+                "names — e.g. a design-doc name vs the code's name). Different features "
+                "that merely interact or share a subsystem are NOT the same. "
+                'Respond JSON: {"same":[<numbers>]}',
+                listing, want_json=True, cache_extra=f"reg-alias:{i}")
+            for j in (out.get("same") or []) if isinstance(out, dict) else []:
+                j = int(j)
+                if 0 <= j < len(chunk):
+                    same.append((chunk[j][1], chunk[j][2]))
+        except Exception:  # noqa: BLE001
+            continue
+    if not same:
+        log(f"  alias pass: {len(pairs)} candidates, none confirmed")
+        return final
+    root = list(range(len(cand)))
+
+    def find(x):
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+
+    for a, b in same:
+        root[find(a)] = find(b)
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(len(cand)):
+        groups[find(i)].append(i)
+    merged_out, absorbed = [], set()
+    for g in groups.values():
+        if len(g) < 2:
+            continue
+        members = [cand[i][1] for i in g]
+        base = max(members, key=lambda m: (m["tier"], len(m["files"])))
+        keys = set().union(*(m.get("_keys") or set() for m in members))
+        base = {**base,
+                "name": keep_key(base["name"], keys),
+                "files": list(dict.fromkeys(f for m in members for f in m["files"])),
+                "stems": set().union(*(m["stems"] for m in members)),
+                "doc_only": all(m.get("doc_only") for m in members)}
+        merged_out.append(base)
+        absorbed.update(id(m) for m in members)
+    kept = [m for m in final if id(m) not in absorbed]
+    log(f"  alias pass: {len(pairs)} candidates, {len(same)} confirmed, "
+        f"{len(absorbed) - len(merged_out)} entries absorbed")
+    return kept + merged_out
+
+
 def build_register(conn, provider, repo: str, cfg: dict, log=print,
                    force: bool = False) -> dict:
     md = cfg.get("scope", {}).get("file", "gitchronicle.md")
@@ -178,27 +280,43 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         reader.close()
     log(f"  {len(entries)} units labelled")
 
-    # docs (scoped) are the highest evidence tier — the repo describing itself
+    # docs (scoped) are the highest evidence tier — but only when the CODE corroborates
+    # them. Identifiers harvested from doc content bridge naming gaps (a doc says
+    # 'Player Virtualization', the code says uiAvatarBuilder). A doc with zero
+    # corroboration is doc-only: outdated or aspirational — catalogued and flagged,
+    # but it claims no code territory and never outranks code naming (tier 2).
+    code_stems = set().union(*(e["stems"] for e in entries)) if entries else set()
     docdirs: dict[str, list[dict]] = defaultdict(list)
-    for d in harvest_docs(repo, scope=scope):
-        parts = d["path"].split("/")
-        if len(parts) >= 3 and parts[0].lower() in ("doc", "docs"):
-            docdirs[parts[1]].append(d)
-        title = d["title"].strip()
-        if not (4 <= len(title) <= 60) or title.lower().endswith((".md", ".txt")):
-            continue
-        entries.append({"name": title[:70], "tier": 4,
-                        "definition": d["excerpt"].replace("\n", " ")[:400],
-                        "files": [d["path"]],
-                        "stems": path_stems(d["path"])})
+    dreader = BatchReader(repo)
+    try:
+        for d in harvest_docs(repo, scope=scope):
+            d["idents"] = _doc_idents(dreader.read("HEAD", d["path"], limit=8000),
+                                      code_stems)
+            parts = d["path"].split("/")
+            if len(parts) >= 3 and parts[0].lower() in ("doc", "docs"):
+                docdirs[parts[1]].append(d)
+            title = d["title"].strip()
+            if not (4 <= len(title) <= 60) or title.lower().endswith((".md", ".txt")):
+                continue
+            corro = bool(d["idents"] or (path_stems(d["path"]) & code_stems))
+            entries.append({"name": title[:70], "tier": 4 if d["idents"] else (3 if corro else 2),
+                            "doc_only": not corro,
+                            "definition": d["excerpt"].replace("\n", " ")[:400],
+                            "files": [d["path"]],
+                            "stems": path_stems(d["path"]) | d["idents"]})
+    finally:
+        dreader.close()
     # Doc/<name>/ subtrees document one system by that name — the strongest naming signal
     for sub, docs in docdirs.items():
         if len(docs) >= 2:
-            entries.append({"name": sub[:70], "tier": 4,
+            idents = set().union(*(x["idents"] for x in docs))
+            entries.append({"name": sub[:70], "tier": 4 if idents else 2,
+                            "doc_only": not idents,
                             "definition": ("documented system: "
                                            + "; ".join(x["title"] for x in docs[:5]))[:400],
                             "files": [x["path"] for x in docs],
-                            "stems": set().union(*(path_stems(x["path"]) for x in docs))})
+                            "stems": set().union(*(path_stems(x["path"]) for x in docs))
+                                     | idents})
 
     # acknowledged subtrees: one entry each, never decomposed
     god = {r["stem"] for r in conn.execute("SELECT stem FROM stem_census WHERE is_god=1")}
@@ -286,6 +404,15 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         else:
             final.extend(part)
 
+    # global ALIAS pass — chunked dedupe can only merge within a chunk; same-feature-
+    # different-name splits (a doc's 'Player Virtualization' vs the code's avatar
+    # entity) need a register-wide sweep: embed name+definition, shortlist high-cosine
+    # pairs, one LLM confirm batch decides which are genuinely the same feature.
+    try:
+        final = _alias_pass(provider, final, _keep_key, log)
+    except Exception as exc:  # noqa: BLE001
+        log(f"  alias pass skipped ({exc})")
+
     # write the register
     doomed = "status IN ('candidate','named','provisional') AND locked=0"
     conn.execute(f"UPDATE concerns SET domain_id=NULL, assign_source=NULL WHERE domain_id IN "
@@ -304,9 +431,10 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         did = conn.execute(
             "INSERT INTO domains (discovery_run_id, name, slug, definition, stems, "
             "named_from, classification, status, created_by) "
-            "VALUES (?,?,?,?,?,?, 'feature','named','auto')",
+            "VALUES (?,?,?,?,?,?,?,'named','auto')",
             (run_id, e["name"], _slug(e["name"]), e["definition"],
-             json.dumps(sorted(e["stems"] - god)[:12]), len(e["files"]))).lastrowid
+             json.dumps(sorted(e["stems"] - god)[:12]), len(e["files"]),
+             "doc-only" if e.get("doc_only") else "feature")).lastrowid
         conn.executemany("INSERT OR REPLACE INTO domain_files (domain_id, path, weight, source) "
                          "VALUES (?,?,1.0,'register')", [(did, f) for f in e["files"][:400]])
         n += 1
