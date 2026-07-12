@@ -153,28 +153,40 @@ def _alias_pass(provider, final: list[dict], keep_key, log) -> list[dict]:
         log("  alias pass: no candidate pairs")
         return final
     same: list[tuple[int, int]] = []
-    for i in range(0, len(pairs), 20):
-        chunk = pairs[i:i + 20]
+    fails = 0
+    for i in range(0, len(pairs), 10):
+        chunk = pairs[i:i + 10]
         listing = "\n".join(
             f"[{j}] {cand[a][1]['name']} — {(cand[a][1]['definition'] or '')[:110]}\n"
             f"    VS {cand[b][1]['name']} — {(cand[b][1]['definition'] or '')[:110]}"
             for j, (_, a, b) in enumerate(chunk))
-        try:
-            out = provider.chat(
-                "Each numbered item shows TWO catalog entries from ONE software project. "
-                "Answer which numbers describe THE SAME feature (one capability under two "
-                "names — e.g. a design-doc name vs the code's name). Different features "
-                "that merely interact or share a subsystem are NOT the same. "
-                'Respond JSON: {"same":[<numbers>]}',
-                listing, want_json=True, cache_extra=f"reg-alias:{i}")
-            for j in (out.get("same") or []) if isinstance(out, dict) else []:
+        out = None
+        for attempt in range(2):
+            try:
+                out = provider.chat(
+                    "Each numbered item shows TWO catalog entries from ONE software "
+                    "project. Answer which numbers describe THE SAME feature (one "
+                    "capability under two names — e.g. a design-doc name vs the code's "
+                    "name). Different features that merely interact or share a subsystem "
+                    "are NOT the same. "
+                    'Respond JSON: {"same":[<numbers>]}',
+                    listing, want_json=True,
+                    cache_extra=f"reg-alias:{i}:{attempt}")
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt:
+                    fails += 1
+                    log(f"  alias chunk {i} failed twice ({exc})")
+        for j in (out.get("same") or []) if isinstance(out, dict) else []:
+            try:
                 j = int(j)
-                if 0 <= j < len(chunk):
-                    same.append((chunk[j][1], chunk[j][2]))
-        except Exception:  # noqa: BLE001
-            continue
+            except (TypeError, ValueError):
+                continue
+            if 0 <= j < len(chunk):
+                same.append((chunk[j][1], chunk[j][2]))
     if not same:
-        log(f"  alias pass: {len(pairs)} candidates, none confirmed")
+        log(f"  alias pass: {len(pairs)} candidates, none confirmed"
+            + (f" ({fails} chunks FAILED)" if fails else ""))
         return final
     root = list(range(len(cand)))
 
@@ -271,7 +283,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                         name = f"{name} ({key})"[:70]
                     entries.append({"name": name, "tier": 3, "key": key,
                                     "definition": str(r.get("definition") or "").strip()[:400],
-                                    "files": fs, "stems": stems, "_head": (head or "")[:400]})
+                                    "files": fs, "stems": stems, "_head": (head or "")[:1200]})
                 else:
                     # files must never vanish: a tier-1 stub named from the stem keeps the
                     # territory covered; review or later evidence can upgrade it
@@ -397,6 +409,8 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             home["stems"] |= e["stems"]
             if e.get("key"):
                 home["_keys"].add(e["key"])
+            if e.get("vendored"):
+                home["vendored"] = True
             if e["tier"] > home["tier"]:
                 home.update(name=e["name"], definition=e["definition"], tier=e["tier"])
             home["name"] = _keep_key(home["name"], home["_keys"])
@@ -430,6 +444,8 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                     continue
                 base = max(members, key=lambda m: m["tier"])
                 mkeys = set().union(*(m.get("_keys") or set() for m in members))
+                if any(m.get("vendored") for m in members):
+                    base = {**base, "vendored": True}
                 final.append({**base,
                               "name": _keep_key(
                                   str(e.get("name") or base["name"]).strip()[:70], mkeys),
