@@ -45,7 +45,15 @@ def build_relations(conn, repo: str, log=print) -> dict:
             owner[path] = max(cs)[2]
     by_base: dict[str, list[int]] = defaultdict(list)
     for path, did in owner.items():
-        base = path.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
+        # declaration shims (.pyi/.d.ts) re-declare a module someone else implements —
+        # never the import target's real owner
+        if path.endswith((".pyi", ".d.ts")):
+            continue
+        parts = path.rsplit("/", 2)
+        base = parts[-1].rsplit(".", 1)[0].lower()
+        # a package's entry file answers to the package name: `import luna` -> luna/__init__.py
+        if base in ("__init__", "index", "mod") and len(parts) >= 2:
+            base = parts[-2].lower()
         by_base[base].append(did)
 
     # read each feature's top territory files once; collect cross-feature references

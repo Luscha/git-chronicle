@@ -73,13 +73,19 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
     sized = {r: [f for f in files if f.startswith(r + "/")] for r in pkgroots}
     for root in sorted(pkgroots):
         dfs = sized[root]
-        if not (3 <= len(dfs) <= 60):
-            continue
-        # maximal package under the cap: skip if a fitting ANCESTOR package exists
-        if any(root.startswith(r + "/") and 3 <= len(sized[r]) <= 60
-               for r in pkgroots if r != root):
-            continue
-        units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
+        if 3 <= len(dfs) <= 60:
+            # maximal package under the cap: skip if a fitting ANCESTOR package exists
+            if any(root.startswith(r + "/") and 3 <= len(sized[r]) <= 60
+                   for r in pkgroots if r != root):
+                continue
+            units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
+        elif len(dfs) > 60:
+            # over-cap package: subtrees form their own units, but the package ROOT
+            # files (entry/dispatcher modules) still carry the package's identity —
+            # without this, luna/__init__.py scatters into whatever family bites first
+            rootfiles = [f for f in dfs if "/" not in f[len(root) + 1:]]
+            if 1 <= len(rootfiles) <= 60:
+                units[f"pkg:{root.rsplit('/', 1)[-1]}"] = rootfiles
     for d, dfs in bydir.items():
         base = d.rsplit("/", 1)[-1]
         if 3 <= len(dfs) <= 40 and base.lower() not in ("src", "include", "lib"):
@@ -88,7 +94,7 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
     from .ground import path_stems as _ps
     kept_leftover = []
     for f in leftover:
-        st = sorted(_ps(f), key=len, reverse=True)
+        st = sorted(_ps(f), key=lambda x: (-len(x), x))
         if st and len(f.rsplit("/", 1)[-1]) >= 8:
             units[f"solo:{st[0]}"] = [f]
         else:

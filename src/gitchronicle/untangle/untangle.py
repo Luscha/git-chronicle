@@ -133,7 +133,7 @@ def _stem_families(paths):
     leftover = []
     for p in paths:
         cands = sorted((s for s in stems_of[p] if freq[s] >= _FAMILY_MIN),
-                       key=lambda s: (freq[s], -len(s)))
+                       key=lambda s: (freq[s], -len(s), s))
         if cands:
             fam[cands[0]].append(p)
         else:
