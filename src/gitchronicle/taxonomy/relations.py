@@ -50,9 +50,13 @@ def build_relations(conn, repo: str, log=print) -> dict:
         if path.endswith((".pyi", ".d.ts")):
             continue
         parts = path.rsplit("/", 2)
-        base = parts[-1].rsplit(".", 1)[0].lower()
-        # a package's entry file answers to the package name: `import luna` -> luna/__init__.py
-        if base in ("__init__", "index", "mod") and len(parts) >= 2:
+        fname = parts[-1].lower()
+        base = fname.rsplit(".", 1)[0]
+        # a package's entry MODULE answers to the package name: `import luna` ->
+        # luna/__init__.py (code only — Doc/luna/index.md must not shadow it)
+        if (base in ("__init__", "index", "mod") and len(parts) >= 2
+                and fname.rsplit(".", 1)[-1]
+                in ("py", "pyw", "js", "mjs", "cjs", "ts", "jsx", "tsx", "rs", "go")):
             base = parts[-2].lower()
         by_base[base].append(did)
 

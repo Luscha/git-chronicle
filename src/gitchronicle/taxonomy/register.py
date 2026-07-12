@@ -69,23 +69,14 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
             bydir["/".join(parts[:-1])].append(f)
         if parts[-1] == "__init__.py" and len(parts) >= 3:
             pkgroots.add("/".join(parts[:-1]))
-    # a python package root is one module INCLUDING its subpackages (when compact)
-    sized = {r: [f for f in files if f.startswith(r + "/")] for r in pkgroots}
+    # a package unit owns its DIRECT children only; subpackages (own __init__) self-
+    # register. Claiming the whole subtree lets generated member trees (protobuf stubs
+    # et al) outnumber the entry module and redefine the package's identity by stems.
     for root in sorted(pkgroots):
-        dfs = sized[root]
-        if 3 <= len(dfs) <= 60:
-            # maximal package under the cap: skip if a fitting ANCESTOR package exists
-            if any(root.startswith(r + "/") and 3 <= len(sized[r]) <= 60
-                   for r in pkgroots if r != root):
-                continue
+        dfs = [f for f in files
+               if f.startswith(root + "/") and "/" not in f[len(root) + 1:]]
+        if 1 <= len(dfs) <= 60:
             units[f"pkg:{root.rsplit('/', 1)[-1]}"] = dfs
-        elif len(dfs) > 60:
-            # over-cap package: subtrees form their own units, but the package ROOT
-            # files (entry/dispatcher modules) still carry the package's identity —
-            # without this, luna/__init__.py scatters into whatever family bites first
-            rootfiles = [f for f in dfs if "/" not in f[len(root) + 1:]]
-            if 1 <= len(rootfiles) <= 60:
-                units[f"pkg:{root.rsplit('/', 1)[-1]}"] = rootfiles
     for d, dfs in bydir.items():
         base = d.rsplit("/", 1)[-1]
         if 3 <= len(dfs) <= 40 and base.lower() not in ("src", "include", "lib"):
