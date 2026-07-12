@@ -62,13 +62,12 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
             "FROM evolution_chapters WHERE target_type='domain' ORDER BY seq"):
         chapters[int(r["target_id"])].append(dict(r))
 
-    written, journey = 0, []
-    for d in doms:
+    written, journey, kb_records = 0, [], []
+    for d in sorted(doms, key=lambda x: x["name"].lower()):
         cs = commits.get(d["id"], [])
-        if len(cs) < _MIN_COMMITS_FULL:
-            continue
         slug = _slug(d["name"])
         rec = {
+            "slug": slug,
             "name": d["name"], "definition": d["definition"] or "",
             "summary": d["summary"] or "", "classification": d["classification"],
             "stems": json.loads(d["stems"] or "[]"),
@@ -83,6 +82,10 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
                          for c in chapters.get(d["id"], [])],
             "commits": cs[:_COMMIT_CAP],
         }
+        kb_records.append(rec)
+        # md/json dossier files only for features with history; the KB shows everything
+        if len(cs) < _MIN_COMMITS_FULL:
+            continue
         (out / f"{slug}.json").write_text(json.dumps(rec, indent=1, ensure_ascii=False))
 
         md = [f"# {d['name']}", ""]
@@ -123,5 +126,8 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
         star = " ⭐" if hub else ""
         idx.append(f"- {date} — [{name}]({slug}.md) ({n} commits){star}")
     (out / "index.md").write_text("\n".join(idx) + "\n")
-    log(f"  {written} dossiers -> {out}/ (+ index.md)")
-    return {"dossiers": written}
+    from .kb import render_kb
+    render_kb(kb_records, out / "kb.html")
+    log(f"  {written} dossiers -> {out}/ (+ index.md, kb.html with all "
+        f"{len(kb_records)} features)")
+    return {"dossiers": written, "kb_features": len(kb_records)}
