@@ -136,7 +136,19 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             part = items[i:i + _PEEK_BATCH]
             blocks = []
             for j, (s, fs) in enumerate(part):
-                rep = _representative(repo, "HEAD", s.split(" (")[0], fs, reader=reader)
+                key = s.split(":", 1)[-1].split(" (")[0]
+                rep = None
+                if s.startswith("pkg:"):
+                    # a package's identity lives in its root entry module, not in whichever
+                    # (often generated) member the include ranking likes best
+                    ents = [f for f in fs
+                            if f.rsplit("/", 1)[-1].rsplit(".", 1)[0] in ("__init__", "index")]
+                    if ents:
+                        rep = min(ents, key=lambda f: f.count("/"))
+                        if len((reader.read("HEAD", rep, limit=200) or "").strip()) < 60:
+                            rep = None      # empty entry file says nothing
+                if rep is None:
+                    rep = _representative(repo, "HEAD", key, fs, reader=reader)
                 depth = _CODE_HEAD * 3 if s.startswith(("solo:", "pkg:")) else _CODE_HEAD
                 head = reader.read("HEAD", rep, limit=depth)
                 blocks.append(f"[{j}] module '{s}' ({rep.rsplit('/', 1)[-1]}, "
