@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS domains (
     removed_at       TEXT,                      -- when the domain's files were deleted
     first_seen       TEXT,
     last_seen        TEXT,
+    born_at          TEXT,           -- first git appearance of any register-territory file
     n_commits        INTEGER,
     n_files          INTEGER,
     created_by       TEXT DEFAULT 'auto',

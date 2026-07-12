@@ -142,6 +142,62 @@ def _llm_pick(provider, batch, feat_line, cache_tag):
     return res
 
 
+def _births(conn, repo: str) -> dict[int, str]:
+    """Feature birth = first git appearance (day precision) of any register-territory
+    file, FOLLOWED THROUGH RENAMES — repo restructures (dev/X -> X) must not reset
+    births or every old feature would look newborn and lose its early history.
+    Temporal grounding: semantic matching alone happily attributes 2016 work to a
+    2023 framework; a feature cannot own commits older than its own code."""
+    from ..extract.git_ingest import run_git
+    first: dict[str, str] = {}
+    parent: dict[str, tuple[str, str]] = {}     # new path -> (old path, date), earliest wins
+    date = ""
+    out = run_git(repo, ["-c", "diff.renameLimit=100000", "log", "--all",
+                         "--find-renames", "--diff-filter=AR", "--name-status",
+                         "--date=format:%Y-%m-%d", "--format=%x01%ad"])
+    for ln in out.splitlines():
+        if ln.startswith("\x01"):
+            date = ln[1:].strip()
+            continue
+        if not ln or not date or "\t" not in ln:
+            continue
+        if ln[0] == "A":
+            p2 = ln.split("\t", 1)[1].strip()
+            if p2 not in first or date < first[p2]:
+                first[p2] = date
+        elif ln[0] == "R":
+            parts = ln.split("\t")
+            if len(parts) == 3:
+                old2, new2 = parts[1].strip(), parts[2].strip()
+                if new2 not in parent or date < parent[new2][1]:
+                    parent[new2] = (old2, date)
+
+    memo: dict[str, str] = {}
+
+    def birth(p2: str, depth: int = 0) -> str:
+        if p2 in memo:
+            return memo[p2]
+        best = first.get(p2, "")
+        if depth < 32 and p2 in parent:
+            old2, d = parent[p2]
+            memo[p2] = best or d                # cycle guard before recursing
+            b = birth(old2, depth + 1) or d
+            if not best or b < best:
+                best = b
+        memo[p2] = best
+        return best
+
+    births: dict[int, str] = {}
+    for r in conn.execute("SELECT domain_id, path FROM domain_files WHERE source='register'"):
+        d = birth(r["path"])
+        if d and (r["domain_id"] not in births or d < births[r["domain_id"]]):
+            births[r["domain_id"]] = d
+    conn.executemany("UPDATE domains SET born_at=? WHERE id=?",
+                     [(b, did) for did, b in births.items()])
+    conn.commit()
+    return births
+
+
 def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: str = "",
              frozen: bool = False, force: bool = False, log=print) -> dict:
     cat = cfg.get("catalog", {})
@@ -168,6 +224,37 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     todo = [r["id"] for r in conn.execute(
         "SELECT id FROM concerns WHERE domain_id IS NULL AND label IS NOT NULL AND (origin IS NULL OR origin != 'import-misc') ORDER BY id")
         if r["id"] in vec]
+
+    # --- stage 0: TERRITORY EVIDENCE — a concern whose files sit dominantly in one
+    # feature's register territory belongs there; file facts outrank semantics and are
+    # never second-guessed by the audit.
+    active = {r["id"] for r in rows}
+    terr_own: dict[str, list[int]] = defaultdict(list)
+    for r in conn.execute("SELECT domain_id, path FROM domain_files WHERE source='register'"):
+        if r["domain_id"] in active:
+            terr_own[r["path"]].append(r["domain_id"])
+    n_terr = 0
+    remaining = []
+    for cid in todo:
+        hits = Counter()
+        for f in info[cid]["files"]:
+            for did in terr_own.get(f, []):
+                hits[did] += 1
+        top2 = hits.most_common(2)
+        if top2 and (len(top2) == 1 or top2[0][1] >= 2 * top2[1][1]):
+            conn.execute("UPDATE concerns SET domain_id=?, assign_source='territory', "
+                         "assign_conf=1.0 WHERE id=?", (top2[0][0], cid))
+            n_terr += 1
+        else:
+            remaining.append(cid)
+    conn.commit()
+    todo = remaining
+    log(f"  territory evidence: {n_terr} assigned by register-file overlap")
+
+    # temporal grounding for every semantic stage below
+    births = _births(conn, cfg.get("repo", {}).get("path", "."))
+    cdates = {r[0]: (r[1] or "")[:10] for r in
+              conn.execute("SELECT hash, authored_at FROM commits")}
     fids, F = embed_definitions(conn, provider, rows)
     feat_line = {r["id"]: f"{r['id']}: {r['name']} — {(r['definition'] or '')[:200]}" for r in rows}
     names = {r["id"]: r["name"] for r in rows}
@@ -191,14 +278,18 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     ambiguous: list[tuple] = []                     # (cid, ctx, shortlist)
     n_fast = 0
     margins = []
+    barr = np.array([births.get(fid, "") for fid in fids])
     for i, cid in enumerate(todo):
         cstems = concern_stems(info[cid])
         score = S[i].copy()
         for fid, fst in feat_stems.items():
             if fst and (fst & cstems):
                 score[fpos_all[fid]] += stem_boost
+        cd = cdates.get(info[cid]["commit"], "")
+        if cd:
+            score[barr > cd] = -9.0     # feature born after this commit: not a candidate
         srt = np.argsort(-score)
-        top = [fids[int(j)] for j in srt[:k]]
+        top = [fids[int(j)] for j in srt[:k] if score[int(j)] > -8.0]
         shortlists[cid] = top
         t1, t2 = float(score[srt[0]]), float(score[srt[1]]) if len(fids) > 1 else 0.0
         margins.append(t1 - t2)
@@ -270,7 +361,7 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     # a forced fit (LLM shoehorned a novel change into a weakly-related feature; validated
     # signature: within-feature outlier + low home cosine + the auditor answers 0) is FREED
     # and joins the NONE queue, where propose can give it an honest new home.
-    n_audit, freed = _audit(conn, provider, vec, info, cat, workers, log)
+    n_audit, freed = _audit(conn, provider, vec, info, cat, workers, log, births=births, cdates=cdates)
     nones += freed
 
     # --- stage 4: NONEs stay honestly unattributed (dead-feature candidates live in the
@@ -360,7 +451,8 @@ def _batch_novelty(conn, provider, cfg, ambiguous, vec, info, feat_stems, names,
     return created, [a for a in ambiguous if a[0] not in absorbed]
 
 
-def _audit(conn, provider, vec, info, cat, workers, log) -> tuple[int, list[int]]:
+def _audit(conn, provider, vec, info, cat, workers, log,
+           births=None, cdates=None) -> tuple[int, list[int]]:
     """Targeted repair: within each feature, members whose facet is a cosine outlier vs the
     member centroid get re-checked (no fast path). Moves only into SETTLED features and only
     on an embedding improvement; when the auditor answers 0 for a weakly-anchored outlier the
@@ -398,9 +490,13 @@ def _audit(conn, provider, vec, info, cat, workers, log) -> tuple[int, list[int]
     settled = {r["id"] for r in rows if r["status"] in ("named", "confirmed")}
     move_margin = float(cat.get("audit_move_margin", 0.03))
     jobs = []
+    births, cdates = births or {}, cdates or {}
     for c, did in suspects:
         sims = vec[c] @ F.T
-        cand = [fids[int(j)] for j in np.argsort(-sims) if fids[int(j)] in settled][:8]
+        cd = cdates.get(info[c]["commit"], "")
+        cand = [fids[int(j)] for j in np.argsort(-sims)
+                if fids[int(j)] in settled
+                and not (cd and births.get(fids[int(j)], "") > cd)][:8]
         if did not in cand:
             cand = cand[:7] + [did]                 # current home always an option
         jobs.append((c, _ctx(info[c]), cand, did))
