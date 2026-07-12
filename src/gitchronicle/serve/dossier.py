@@ -28,6 +28,11 @@ def _slug(name: str) -> str:
 def export_dossiers(conn, out_dir: str, log=print) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # the bundle must be a pure projection of THIS db — stale pages from an earlier
+    # run polluting the browse surface is worse than no page at all
+    for old in out.iterdir():
+        if old.is_file() and (old.suffix in (".md", ".json") or old.name == "kb.html"):
+            old.unlink()
 
     doms = [dict(r) for r in conn.execute(
         "SELECT id, name, definition, summary, stems, classification, fan_in "
