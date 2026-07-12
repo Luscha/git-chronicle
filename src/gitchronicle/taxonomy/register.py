@@ -172,14 +172,14 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                     stems.add(key)
                     if len(key) >= 5 and " " not in key and key.lower() not in name.lower():
                         name = f"{name} ({key})"[:70]
-                    entries.append({"name": name, "tier": 3,
+                    entries.append({"name": name, "tier": 3, "key": key,
                                     "definition": str(r.get("definition") or "").strip()[:400],
                                     "files": fs, "stems": stems})
                 else:
                     # files must never vanish: a tier-1 stub named from the stem keeps the
                     # territory covered; review or later evidence can upgrade it
                     stub = s.split(":", 1)[-1].split(" (")[0]
-                    entries.append({"name": stub[:70], "tier": 1,
+                    entries.append({"name": stub[:70], "tier": 1, "key": stub,
                                     "definition": "", "files": fs, "stems": stems})
             if i and i % 200 == 0:
                 log(f"    {i}/{len(items)} units peeked")
@@ -219,6 +219,14 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                         "files": [root], "stems": path_stems(root + "/x"), "ack": root})
 
     # deterministic territory merge (tier wins on conflict), then chunked LLM dedupe
+    def _keep_key(name: str, keys: set) -> str:
+        """A coined identifier (uchtml, luna) must survive every rename — it is the
+        owner's own word for the feature and the KB's most searchable handle."""
+        ks = sorted(k for k in keys if len(k) >= 5 and " " not in k)
+        if not ks or any(k.lower() in name.lower() for k in ks):
+            return name
+        return f"{name} ({ks[0]})"[:70]
+
     merged: list[dict] = []
     for e in sorted(entries, key=lambda d: -d["tier"]):
         nest = _norm_stems(e["stems"] - god)
@@ -230,13 +238,16 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 home = m
                 break
         if home is None:
-            merged.append({**e, "_norm": nest})
+            merged.append({**e, "_norm": nest, "_keys": {e["key"]} if e.get("key") else set()})
         else:
             home["files"] = list(dict.fromkeys(home["files"] + e["files"]))
             home["_norm"] |= nest
             home["stems"] |= e["stems"]
+            if e.get("key"):
+                home["_keys"].add(e["key"])
             if e["tier"] > home["tier"]:
                 home.update(name=e["name"], definition=e["definition"], tier=e["tier"])
+            home["name"] = _keep_key(home["name"], home["_keys"])
     log(f"  {len(merged)} entries after territory merge")
 
     protected = [m for m in merged if m["tier"] >= 4]
@@ -266,8 +277,10 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 if not members:
                     continue
                 base = max(members, key=lambda m: m["tier"])
+                mkeys = set().union(*(m.get("_keys") or set() for m in members))
                 final.append({**base,
-                              "name": str(e.get("name") or base["name"]).strip()[:70],
+                              "name": _keep_key(
+                                  str(e.get("name") or base["name"]).strip()[:70], mkeys),
                               "definition": str(e.get("definition")
                                                 or base["definition"]).strip()[:400],
                               "files": list(dict.fromkeys(
