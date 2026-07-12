@@ -208,10 +208,13 @@ def _alias_pass(provider, final: list[dict], keep_key, log) -> list[dict]:
         members = [cand[i][1] for i in g]
         base = max(members, key=lambda m: (m["tier"], len(m["files"])))
         keys = set().union(*(m.get("_keys") or set() for m in members))
+        vn = sum(m.get("_vn", len(m["files"]) if m.get("vendored") else 0)
+                 for m in members)
         base = {**base,
                 "name": keep_key(base["name"], keys),
                 "files": list(dict.fromkeys(f for m in members for f in m["files"])),
                 "stems": set().union(*(m["stems"] for m in members)),
+                "vendored": vn * 2 > sum(len(m["files"]) for m in members),
                 "doc_only": all(m.get("doc_only") for m in members)}
         merged_out.append(base)
         absorbed.update(id(m) for m in members)
@@ -402,6 +405,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 break
         if home is None:
             merged.append({**e, "_norm": nest, "_seed": frozenset(nest),
+                           "_vn": len(e["files"]) if e.get("vendored") else 0,
                            "_keys": {e["key"]} if e.get("key") else set()})
         else:
             home["files"] = list(dict.fromkeys(home["files"] + e["files"]))
@@ -410,10 +414,14 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             if e.get("key"):
                 home["_keys"].add(e["key"])
             if e.get("vendored"):
-                home["vendored"] = True
+                home["_vn"] = home.get("_vn", 0) + len(e["files"])
             if e["tier"] > home["tier"]:
                 home.update(name=e["name"], definition=e["definition"], tier=e["tier"])
             home["name"] = _keep_key(home["name"], home["_keys"])
+    for m in merged:
+        # vendored only when third-party files are the MAJORITY — a first-party
+        # feature absorbing two generated templates must not get shelved
+        m["vendored"] = m.get("_vn", 0) * 2 > len(m["files"])
     log(f"  {len(merged)} entries after territory merge")
 
     protected = [m for m in merged if m["tier"] >= 4]
@@ -444,8 +452,9 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                     continue
                 base = max(members, key=lambda m: m["tier"])
                 mkeys = set().union(*(m.get("_keys") or set() for m in members))
-                if any(m.get("vendored") for m in members):
-                    base = {**base, "vendored": True}
+                vn = sum(m.get("_vn", len(m["files"]) if m.get("vendored") else 0)
+                         for m in members)
+                base = {**base, "vendored": vn * 2 > sum(len(m["files"]) for m in members)}
                 final.append({**base,
                               "name": _keep_key(
                                   str(e.get("name") or base["name"]).strip()[:70], mkeys),
