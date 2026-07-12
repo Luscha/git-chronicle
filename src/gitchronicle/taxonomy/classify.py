@@ -319,13 +319,21 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
             names = {r["id"]: r["name"] for r in rows}
             feat_stems = {r["id"]: set(json.loads(r["stems"] or "[]")) for r in rows}
             fpos_all = {fid: i for i, fid in enumerate(fids)}
+            barr = np.array([births.get(fid, "") for fid in fids])
             for pos, (cid, ctx, _) in enumerate(list(ambiguous)):
                 cstems = concern_stems(info[cid])
                 score = (vec[cid] @ F.T).copy()
                 for fid, fst in feat_stems.items():
                     if fst and (fst & cstems):
                         score[fpos_all[fid]] += stem_boost
-                ambiguous[pos] = (cid, ctx, [fids[int(j)] for j in np.argsort(-score)[:k]])
+                cd = cdates.get(info[cid]["commit"], "")
+                if cd:
+                    score[barr > cd] = -9.0   # same birth mask as stage 1 — this rebuild
+                                              # silently replaced masked shortlists once
+                ambiguous[pos] = (cid, ctx, [fids[int(j)] for j in np.argsort(-score)[:k]
+                                             if score[int(j)] > -8.0])
+                # shortlists feeds the invalid-pick retry: keep it masked too
+                shortlists[cid] = ambiguous[pos][2]
 
     # --- stage 2: batched LLM pick-by-ID (parallel) ---
     batches = [ambiguous[i:i + batch_n] for i in range(0, len(ambiguous), batch_n)]
