@@ -11,11 +11,16 @@ of which I created many other systems" narrative anchor the chronicle needs.
 
 from __future__ import annotations
 
-import json
+import re
 from collections import Counter, defaultdict
 
 from ..extract.git_ingest import BatchReader
 from .imports import extract_import_refs
+
+# embedded-interpreter module registration: the C/C++ side coins the importable name
+# (CPython convention; e.g. Py_InitModule("luna", ...) makes `import luna` bind here)
+_EMBED_RE = re.compile(
+    r'(?:Py_InitModule[34]?|PyImport_AppendInittab|PyModule_Create2?)\s*\(\s*"(\w+)"')
 
 _MAX_FILES_PER_FEATURE = 80    # territory files read per feature (by weight)
 _MIN_EDGE_FILES = 2            # distinct importing files needed to assert an edge
@@ -32,7 +37,8 @@ def build_relations(conn, repo: str, log=print) -> dict:
     # file -> owning feature: register territory (worktree truth) beats history-derived
     # weight; files claimed by many features are ambiguous glue and own nothing
     claims: dict[str, list] = defaultdict(list)
-    for r in conn.execute("SELECT domain_id, path, weight, source FROM domain_files"):
+    for r in conn.execute("SELECT domain_id, path, weight, source FROM domain_files "
+                          "ORDER BY source='register' DESC, weight DESC"):
         if r["domain_id"] in feats:
             claims[r["path"]].append(
                 (1 if r["source"] == "register" else 0, r["weight"] or 0, r["domain_id"]))
@@ -66,25 +72,47 @@ def build_relations(conn, repo: str, log=print) -> dict:
         if len(per_feat_files[did]) < _MAX_FILES_PER_FEATURE:
             per_feat_files[did].append(path)
     reader = BatchReader(repo)
-    edge_files: dict[tuple, set] = defaultdict(set)
+    texts: dict[str, str] = {}
+    embed_owner: dict[str, int | None] = {}
     try:
         for did, files in per_feat_files.items():
             for f in files:
-                text = reader.read("HEAD", f, limit=15000)
+                text = reader.read("HEAD", f, limit=60000)
                 if not text:
                     continue
-                for ref in extract_import_refs(text):
-                    owners = by_base.get(ref, [])
-                    if len(owners) == 1 and owners[0] != did:
-                        edge_files[(did, owners[0])].add(f)
+                texts[f] = text
+                for m in _EMBED_RE.finditer(text):
+                    name = m.group(1).lower()
+                    # two features registering the same module name = ambiguous, drop it
+                    embed_owner[name] = did if embed_owner.get(name, did) == did else None
     finally:
         reader.close()
+
+    edge_files: dict[tuple, set] = defaultdict(set)
+    strong_edges: set[tuple] = set()
+    for did, files in per_feat_files.items():
+        for f in files:
+            text = texts.get(f)
+            if not text:
+                continue
+            for ref in extract_import_refs(text):
+                if ref in embed_owner:
+                    target = embed_owner[ref]     # None = ambiguous registration
+                    strong = True                 # coined module name: one import suffices
+                else:
+                    owners = by_base.get(ref, [])
+                    target = owners[0] if len(owners) == 1 else None
+                    strong = False
+                if target is not None and target != did:
+                    edge_files[(did, target)].add(f)
+                    if strong:
+                        strong_edges.add((did, target))
 
     conn.execute("DELETE FROM domain_edges WHERE status != 'confirmed' AND locked = 0")
     n = 0
     used_by: Counter = Counter()
     for (a, b), files in edge_files.items():
-        if len(files) < _MIN_EDGE_FILES:
+        if len(files) < _MIN_EDGE_FILES and (a, b) not in strong_edges:
             continue
         conn.execute(
             "INSERT INTO domain_edges (src_domain, dst_domain, type, weight, why, status) "
