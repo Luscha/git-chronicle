@@ -224,6 +224,236 @@ def _alias_pass(provider, final: list[dict], keep_key, log) -> list[dict]:
     return kept + merged_out
 
 
+
+def _keep_key(name: str, keys: set) -> str:
+    """A coined identifier (uchtml, luna) must survive every rename — it is the
+    owner's own word for the feature and the KB's most searchable handle."""
+    ks = sorted(k for k in keys if len(k) >= 5 and " " not in k)
+    if not ks or any(k.lower() in name.lower() for k in ks):
+        return name
+    return f"{name} ({ks[0]})"[:70]
+
+
+_CLUSTER_CAP = 120      # a consolidated feature never exceeds this (anti-blob)
+_SUBTREE_MAX = 800      # self-contained subtree (a tool) collapses to one entry up to this
+_FANIN_HUB = 8          # units referenced by this many others are infrastructure, not fragments
+
+
+def _home_dir(files: list[str]) -> str:
+    """Deepest common directory of a unit's files."""
+    parts = [f.split("/")[:-1] for f in files]
+    if not parts:
+        return ""
+    pre = parts[0]
+    for q in parts[1:]:
+        n = 0
+        while n < min(len(pre), len(q)) and pre[n] == q[n]:
+            n += 1
+        pre = pre[:n]
+        if not pre:
+            break
+    return "/".join(pre)
+
+
+def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) -> list[dict]:
+    """Merge peek-labelled units the IMPORT GRAPH proves are one system. Stem kinship
+    carves structure; use defines features — an abstract-renderer header and its
+    renderers, or a tool's subtree, are one feature however the basenames family.
+    Locality (common ancestor dir) + size caps keep this from ever building blobs."""
+    idx = [e for e in entries if not e.get("vendored") and len(e["files"]) <= 300]
+    pos = {id(e): i for i, e in enumerate(idx)}
+    own: dict[str, int] = {}
+    by_base: dict[str, list[int]] = defaultdict(list)
+    for i, e in enumerate(idx):
+        for f in e["files"]:
+            own.setdefault(f, i)
+            base = f.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
+            if base in ("__init__", "index", "mod") and "/" in f:
+                base = f.rsplit("/", 2)[-2].lower()
+            by_base[base].append(i)
+
+    from .imports import extract_import_refs
+    reader = BatchReader(repo)
+    refs_of: dict[tuple, set] = defaultdict(set)      # (src_unit, dst_unit) -> src files
+    try:
+        for i, e in enumerate(idx):
+            if len(e["files"]) > _CLUSTER_CAP:
+                continue                      # big dir-units: members, not edge sources
+            for f in sorted(e["files"])[:60]:
+                text = reader.read("HEAD", f, limit=20000)
+                if not text:
+                    continue
+                for ref in extract_import_refs(text):
+                    owners = sorted(set(by_base.get(ref, [])))
+                    if len(owners) == 1 and owners[0] != i:
+                        refs_of[(i, owners[0])].add(f)
+    finally:
+        reader.close()
+
+    # 0) the pkg/dir/family generators can carve the SAME files -> one unit, not three
+    sig: dict[tuple, int] = {}
+    dup_pairs = []
+    for i, e in enumerate(idx):
+        k = tuple(sorted(e["files"]))
+        if k in sig:
+            dup_pairs.append((sig[k], i))
+        else:
+            sig[k] = i
+
+    homes = [_home_dir(e["files"]) for e in idx]
+    fan_in = Counter(b for (_, b) in refs_of)
+
+    def _ancestor_ok(a: int, b: int) -> bool:
+        ha, hb = homes[a], homes[b]
+        if not ha or not hb:
+            return False
+        share = _home_dir([ha + "/x", hb + "/x"])
+        return share.count("/") >= 1                  # depth >= 2 (e.g. Client/EterLibrary)
+
+    root = list(range(len(idx)))
+
+    def find(x):
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+
+    size = [len(e["files"]) for e in idx]
+
+    def union(a, b) -> bool:
+        ra, rb = find(a), find(b)
+        if ra == rb or size[ra] + size[rb] > _CLUSTER_CAP:
+            return False
+        root[ra] = rb
+        size[rb] += size[ra]
+        return True
+
+    n_dup = 0
+    for a, b in dup_pairs:
+        n_dup += union(a, b)
+
+    # 1) mutual references: interface and implementation cite each other
+    mutual = sorted((min(len(refs_of[(a, b)]) + len(refs_of[(b, a)]), 99), a, b)
+                    for (a, b) in refs_of if a < b and (b, a) in refs_of)
+    n_mut = 0
+    for _, a, b in sorted(mutual, reverse=True):
+        if fan_in[a] <= _FANIN_HUB and fan_in[b] <= _FANIN_HUB and _ancestor_ok(a, b):
+            n_mut += union(a, b)
+
+    # 2) a small fragment folds into the unit that uses it (accessor -> its system)
+    n_dir = 0
+    for (a, b), fs in sorted(refs_of.items()):
+        if len(fs) >= 2 and len(idx[b]["files"]) <= 10 and fan_in[b] <= _FANIN_HUB \
+                and _ancestor_ok(a, b):
+            n_dir += union(b, a)
+
+    # 3) a self-contained subtree is ONE tool/feature however many stem families live
+    #    inside it: cohesion is MEASURED (references stay internal), so the cluster cap
+    #    does not apply — but genuinely multi-feature trees (a 600-file client library)
+    #    stay split via the size sanity bound and the deepest-first walk
+    anc: dict[str, set[int]] = defaultdict(set)
+    for i, h in enumerate(homes):
+        parts = h.split("/")
+        for d in range(2, len(parts) + 1):
+            anc["/".join(parts[:d])].add(i)
+    n_sub = 0
+    collapsed: dict[str, int] = {}
+    for d in sorted(anc, key=lambda x: (-x.count("/"), x)):
+        members = sorted(anc[d])
+        roots = sorted({find(m) for m in members})
+        if len(roots) < 2 or sum(size[r] for r in roots) > _SUBTREE_MAX:
+            continue
+        mem = set(members)
+        internal = external = 0
+        for (a, b), fs in refs_of.items():
+            if a in mem:
+                if b in mem:
+                    internal += len(fs)
+                else:
+                    external += len(fs)
+        need = 0.75 if sum(size[r] for r in roots) > 200 else 0.6
+        if internal >= 2 and internal / max(1, internal + external) >= need:
+            base = roots[0]
+            for r in roots[1:]:
+                ra, rb = find(base), find(r)
+                if ra != rb:
+                    root[ra] = rb
+                    size[rb] += size[ra]
+                    base = rb
+                    n_sub += 1
+            collapsed[d] = find(base)
+
+    # 4) mop-up: global stem families leak a tool's files across the tree by generic
+    #    basenames ('version', 'shaders'); a unit majority-inside a collapsed subtree
+    #    belongs to it
+    n_mop = 0
+    for d in sorted(collapsed, key=lambda x: (-x.count("/"), x)):
+        r = find(collapsed[d])
+        for i, e in enumerate(idx):
+            if find(i) == r:
+                continue
+            share = sum(1 for f in e["files"] if f.startswith(d + "/")) / len(e["files"])
+            if share >= 0.6:
+                ra, rb = find(i), r
+                if ra != rb and size[ra] + size[rb] <= _SUBTREE_MAX:
+                    root[ra] = rb
+                    size[rb] += size[ra]
+                    n_mop += 1
+
+    clusters: dict[int, list[int]] = defaultdict(list)
+    for i in range(len(idx)):
+        clusters[find(i)].append(i)
+    merged_ids = set()
+    out: list[dict] = []
+    renamed = []
+    for r, members in sorted(clusters.items()):
+        if len(members) < 2:
+            continue
+        ms = [idx[i] for i in members]
+        base = max(ms, key=lambda m: (len(m["files"]), m["name"]))
+        keys = {m["key"] for m in ms if m.get("key")}
+        e = {**base,
+             "name": keep_key(base["name"], keys),
+             "files": sorted(dict.fromkeys(f for m in ms for f in m["files"])),
+             "stems": set().union(*(m["stems"] for m in ms)),
+             "tier": max(m["tier"] for m in ms),
+             "_ckeys": keys,
+             "_members": [m["name"] for m in ms][:8]}
+        merged_ids.update(id(m) for m in ms)
+        out.append(e)
+        if len(ms) >= 3:
+            renamed.append(e)
+    # name genuinely multi-part clusters at feature altitude (one cheap batch)
+    for i in range(0, len(renamed), 12):
+        chunk = renamed[i:i + 12]
+        listing = "\n".join(f"[{j}] parts: {'; '.join(e['_members'])}\n"
+                             f"    definition: {(e['definition'] or '')[:120]}"
+                             for j, e in enumerate(chunk))
+        try:
+            got = provider.chat(
+                "Each numbered item lists code modules that the import graph proves form "
+                "ONE feature/system of a software project. Name that system at feature "
+                "altitude (what a maintainer calls it; keep coined identifiers verbatim) "
+                "and define it in one sentence. "
+                'Respond JSON: {"clusters":{"<n>":{"name":"...","definition":"..."}}}',
+                listing, want_json=True, cache_extra=f"reg-cluster:{i}")
+            cl = got.get("clusters", {}) if isinstance(got, dict) else {}
+            for j, e in enumerate(chunk):
+                r2 = cl.get(str(j)) or {}
+                if r2.get("name"):
+                    e["name"] = keep_key(str(r2["name"]).strip()[:70],
+                                         e.get("_ckeys") or set())
+                if r2.get("definition"):
+                    e["definition"] = str(r2["definition"]).strip()[:400]
+        except Exception:  # noqa: BLE001
+            continue
+    kept = [e for e in entries if id(e) not in merged_ids]
+    log(f"  consolidation: {n_dup} duplicate + {n_mut} mutual + {n_dir} fragment + "
+        f"{n_sub} subtree + {n_mop} mop-up unions "
+        f"-> {len(entries)} units => {len(kept) + len(out)} entries")
+    return kept + out
+
+
 def build_register(conn, provider, repo: str, cfg: dict, log=print,
                    force: bool = False) -> dict:
     md = cfg.get("scope", {}).get("file", "gitchronicle.md")
@@ -332,13 +562,20 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             continue
     log(f"  vendor pass: {len(marks)} header-marked units, {n_vend} confirmed third-party")
 
-    # docs (scoped) are the highest evidence tier — but only when the CODE corroborates
-    # them. Identifiers harvested from doc content bridge naming gaps (a doc says
-    # 'Player Virtualization', the code says uiAvatarBuilder). A doc with zero
-    # corroboration is doc-only: outdated or aspirational — catalogued and flagged,
-    # but it claims no code territory and never outranks code naming (tier 2).
+    # import-graph consolidation: stem carving fragments real systems (an abstract
+    # renderer vs its pipeline, a tool subtree); use-evidence reunites them
+    entries = _consolidate_units(repo, entries, provider, _keep_key, log)
+
+    # docs are EVIDENCE about features, not features. A doc only becomes a register
+    # entry in its own right when it genuinely DEFINES a system (design doc); how-tos
+    # and references merge into the code feature they corroborate (code wins naming);
+    # meta/navigation pages and uncorroborated leftovers shelve as classification='doc'.
+    # An LLM triage on title+excerpt decides the kind and coins the canonical
+    # (code-language) feature name — doc titles in any language stay searchable in the
+    # definition text.
     code_stems = set().union(*(e["stems"] for e in entries)) if entries else set()
     docdirs: dict[str, list[dict]] = defaultdict(list)
+    singles: list[dict] = []
     dreader = BatchReader(repo)
     try:
         for d in harvest_docs(repo, scope=scope):
@@ -350,14 +587,45 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             title = d["title"].strip()
             if not (4 <= len(title) <= 60) or title.lower().endswith((".md", ".txt")):
                 continue
-            corro = bool(d["idents"] or (path_stems(d["path"]) & code_stems))
-            entries.append({"name": title[:70], "tier": 4 if d["idents"] else (3 if corro else 2),
-                            "doc_only": not corro,
-                            "definition": d["excerpt"].replace("\n", " ")[:400],
-                            "files": [d["path"]],
-                            "stems": path_stems(d["path"]) | d["idents"]})
+            singles.append(d)
     finally:
         dreader.close()
+    for i in range(0, len(singles), 15):
+        chunk = singles[i:i + 15]
+        listing = "\n".join(
+            f"[{j}] title: {d['title'][:70]}\n    excerpt: "
+            f"{d['excerpt'].replace(chr(10), ' ')[:150]}"
+            for j, d in enumerate(chunk))
+        got = {}
+        try:
+            got = provider.chat(
+                "Classify each documentation page of ONE software project. kind: "
+                "'design' = defines/specifies a system or feature; 'howto' = procedure "
+                "or guide about existing functionality; 'meta' = index/navigation/"
+                "process page. Also give name: the concise English feature-altitude "
+                "name of the system the page is about (keep the project's coined "
+                'identifiers verbatim). Respond JSON: {"docs":{"<n>":{"kind":"design|'
+                'howto|meta","name":"..."}}}',
+                listing, want_json=True, cache_extra=f"reg-doctriage:{i}")
+        except Exception:  # noqa: BLE001
+            got = {}
+        kinds = got.get("docs", {}) if isinstance(got, dict) else {}
+        for j, d in enumerate(chunk):
+            k = kinds.get(str(j)) or {}
+            kind = str(k.get("kind") or "howto").lower()
+            name = str(k.get("name") or d["title"]).strip()[:70] or d["title"][:70]
+            corro = bool(d["idents"] or (path_stems(d["path"]) & code_stems))
+            # design docs stand as feature candidates; how-tos merge into code (tier
+            # below the code peek so code names win) or shelve; meta always shelves
+            entries.append({
+                "name": name,
+                "tier": 4 if (kind == "design" and d["idents"]) else 2,
+                "doc_kind": kind,
+                "doc_only": kind == "meta" or not corro,
+                "definition": (f"[{d['title']}] " + d["excerpt"].replace("\n", " "))[:400],
+                "files": [d["path"]],
+                "stems": (path_stems(d["path"]) | d["idents"]) if kind != "meta"
+                         else path_stems(d["path"])})
     # Doc/<name>/ subtrees document one system by that name — the strongest naming signal
     for sub, docs in docdirs.items():
         if len(docs) >= 2:
@@ -380,14 +648,6 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                         "files": [root], "stems": path_stems(root + "/x"), "ack": root})
 
     # deterministic territory merge (tier wins on conflict), then chunked LLM dedupe
-    def _keep_key(name: str, keys: set) -> str:
-        """A coined identifier (uchtml, luna) must survive every rename — it is the
-        owner's own word for the feature and the KB's most searchable handle."""
-        ks = sorted(k for k in keys if len(k) >= 5 and " " not in k)
-        if not ks or any(k.lower() in name.lower() for k in ks):
-            return name
-        return f"{name} ({ks[0]})"[:70]
-
     merged: list[dict] = []
     for e in sorted(entries, key=lambda d: -d["tier"]):
         nest = _norm_stems(e["stems"] - god)
