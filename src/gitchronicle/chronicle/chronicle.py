@@ -161,6 +161,18 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
         conn.execute("DELETE FROM evolution_chapters WHERE target_type='domain' AND target_id=?", (str(did),))
         narratives = []
         for seq, ch in enumerate(chapters):
+            if len(ch) == 1:
+                # one commit needs no narration — the commit IS the chapter
+                c0 = ch[0]
+                body0 = (c0["body"].splitlines() or [""])[0][:240]
+                conn.execute(
+                    "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, "
+                    "period_end, title, narrative, commit_hashes, created_at) "
+                    "VALUES ('domain', ?,?,?,?,?,?,?,?)",
+                    (str(did), seq, c0["date"], c0["date"], c0["subject"][:80],
+                     body0, json.dumps([c0["hash"][:10]]), now_iso()))
+                narratives.append(body0 or c0["subject"])
+                continue
             subj = "\n".join(
                 f"- {c['subject']}" + (f"  ~ {c['body'].splitlines()[0][:120]}" if c["body"] else "")
                 for c in ch[:14])
@@ -182,8 +194,13 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
                 "title, narrative, commit_hashes, created_at) VALUES ('domain', ?,?,?,?,?,?,?,?)",
                 (str(did), seq, ch[0]["date"], ch[-1]["date"], (r.get("title") or "").strip()[:80],
                  narr, json.dumps([c["hash"][:10] for c in ch]), now_iso()))
-        # distill the domain's "what" from its story
+        # distill the domain's "what" from its story (a one-commit feature has no arc
+        # to distill — its register definition already says what it is)
         story = "\n".join(f"- {n}" for n in narratives if n)
+        if len(commits) == 1:
+            conn.commit()
+            done += 1
+            continue
         try:
             r = provider.chat(DISTILL_SYS, f"Domain: {d['name']}\nEvolution:\n{story}\n\n"
                               'Return {"summary":"..."}', want_json=True, cache_extra=f"distill:{did}:{len(narratives)}")
