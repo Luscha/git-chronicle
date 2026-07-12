@@ -223,13 +223,19 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         nest = _norm_stems(e["stems"] - god)
         home = None
         for m in merged:
-            small = min(len(nest), len(m["_norm"])) or 1
-            ov = nest & m["_norm"]
+            # match against the SEED's stems, never the accumulated union — otherwise
+            # every absorption widens the net and unrelated units chain into one blob
+            small = min(len(nest), len(m["_seed"])) or 1
+            ov = nest & m["_seed"]
+            # different coined identifiers = different features, whatever the overlap
+            if e.get("key") and m.get("key") and e["key"] != m["key"]:
+                continue
             if (len(ov) >= 2 or any(" " in s for s in ov)) and len(ov) * 2 >= small:
                 home = m
                 break
         if home is None:
-            merged.append({**e, "_norm": nest, "_keys": {e["key"]} if e.get("key") else set()})
+            merged.append({**e, "_norm": nest, "_seed": frozenset(nest),
+                           "_keys": {e["key"]} if e.get("key") else set()})
         else:
             home["files"] = list(dict.fromkeys(home["files"] + e["files"]))
             home["_norm"] |= nest
