@@ -176,7 +176,10 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
             subj = "\n".join(
                 f"- {c['subject']}" + (f"  ~ {c['body'].splitlines()[0][:120]}" if c["body"] else "")
                 for c in ch[:14])
-            diff = _diff_of(conn, repo, did, [c["hash"] for c in ch])
+            # a diff is only worth its tokens when the subjects are thin; richer
+            # chapters narrate from their own commit messages
+            diff = (_diff_of(conn, repo, did, [c["hash"] for c in ch])
+                    if len(ch) <= 2 else "")
             user = (f"Domain: {d['name']}\nPeriod: {ch[0]['date'][:10]} .. {ch[-1]['date'][:10]} "
                     f"({len(ch)} commits)\nCommits:\n{subj}\n\nRepresentative diff:\n{diff or '(none)'}"
                     f"\n\n{CHAP_SCHEMA}")

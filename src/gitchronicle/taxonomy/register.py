@@ -56,7 +56,20 @@ def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
                  if e not in ("png", "jpg", "dds", "tga", "wav", "mp3", "bin", "dat",
                               "gif", "bmp", "ico", "ttf", "sub", "gr2", "mse", "msa")}
     files = [p for p in files if "." in p and p.rsplit(".", 1)[-1].lower() in code_exts]
-    fams, leftover = _stem_families(files)
+    # families are COMPONENT-SCOPED: a stem family must never straddle two components
+    # (Tools/WorldEditor vs Tools/SoundArranger), or the unit belongs to neither and
+    # folds into neither — 'ActorInstanceAccessor' living in two tools at once.
+    bycomp: dict[str, list[str]] = defaultdict(list)
+    for f in files:
+        parts = f.split("/")
+        bycomp["/".join(parts[:2]) if len(parts) > 2 else parts[0]].append(f)
+    fams: dict[str, list[str]] = {}
+    leftover: list[str] = []
+    for comp in sorted(bycomp):
+        cf, cl = _stem_families(bycomp[comp])
+        for st, fs in cf.items():
+            fams[st if st not in fams else f"{st} [{comp.rsplit('/', 1)[-1]}]"] = fs
+        leftover += cl
     units: dict[str, list[str]] = {}
     # cohesive small directories are modules in their own right (a python package like
     # luna/ is one framework even when its files family by inner basenames): add an
@@ -235,7 +248,15 @@ def _keep_key(name: str, keys: set) -> str:
 
 
 _CLUSTER_CAP = 120      # a consolidated feature never exceeds this (anti-blob)
-_SUBTREE_MAX = 800      # self-contained subtree (a tool) collapses to one entry up to this
+_SUBTREE_MAX = 800      # self-contained subtree collapses to one entry up to this
+_LEAF_MAX = 2500        # hard ceiling on any collapsed subtree
+_SEM_FLOOR = 0.78       # mean cosine of member labels to their centroid. Measured on
+                        # void-queue: unmistakable tools/libs 0.78-0.96 (every unit is a
+                        # facet of one thing); feature homes 0.69 (Server/game hosts
+                        # affect, battle, guild...). Below the floor: stay decomposed.
+_SEM_LEAF_FLOOR = 0.74  # a LEAF subtree (nothing imports from it) only needs to be
+                        # coherent-ish to be one product: WorldEditor 0.75. Shared libs
+                        # (GameLibrary 0.72, imported by the UI) never qualify.
 _FANIN_HUB = 8          # units referenced by this many others are infrastructure, not fragments
 
 
@@ -253,6 +274,24 @@ def _home_dir(files: list[str]) -> str:
         if not pre:
             break
     return "/".join(pre)
+
+
+def _cohesive_semantics(provider, names: list[str], floor: float) -> bool:
+    """Do these peek labels describe ONE system? Structural cohesion cannot tell a
+    standalone tool (every unit is a facet of the same thing) from a well-modularised
+    layer (Server/game: affect, battle, guild, skill — dozens of features that of
+    course reference each other). The labels themselves carry that distinction."""
+    import numpy as np
+    if len(names) < 2:
+        return True
+    try:
+        V = provider.embed(names[:40])
+    except Exception:  # noqa: BLE001
+        return False                       # no evidence => do not collapse
+    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
+    c = V.mean(0)
+    c /= (np.linalg.norm(c) + 1e-9)
+    return float((V @ c).mean()) >= floor
 
 
 def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) -> list[dict]:
@@ -279,12 +318,21 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
         for i, e in enumerate(idx):
             if len(e["files"]) > _CLUSTER_CAP:
                 continue                      # big dir-units: members, not edge sources
+            comp_i = "/".join(e["files"][0].split("/")[:2])
             for f in sorted(e["files"])[:60]:
                 text = reader.read("HEAD", f, limit=20000)
                 if not text:
                     continue
                 for ref in extract_import_refs(text):
                     owners = sorted(set(by_base.get(ref, [])))
+                    if len(owners) > 1:
+                        # a basename can exist in several components; resolution is
+                        # LOCAL (an #include in a tool means the tool's header, not a
+                        # same-named engine header) — without this, every reference
+                        # inside a component with colliding names is silently dropped
+                        local = [o for o in owners
+                                 if "/".join(idx[o]["files"][0].split("/")[:2]) == comp_i]
+                        owners = local
                     if len(owners) == 1 and owners[0] != i:
                         refs_of[(i, owners[0])].add(f)
     finally:
@@ -340,11 +388,16 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
         if fan_in[a] <= _FANIN_HUB and fan_in[b] <= _FANIN_HUB and _ancestor_ok(a, b):
             n_mut += union(a, b)
 
-    # 2) a small fragment folds into the unit that uses it (accessor -> its system)
+    # 2) a small fragment folds into the unit that uses it (accessor -> its system).
+    #    Inside ONE directory locality beats the hub guard: a base class its siblings
+    #    all derive from is the core of that system, not shared infrastructure — the
+    #    fan-in guard only protects genuinely cross-directory hubs.
     n_dir = 0
     for (a, b), fs in sorted(refs_of.items()):
-        if len(fs) >= 2 and len(idx[b]["files"]) <= 10 and fan_in[b] <= _FANIN_HUB \
-                and _ancestor_ok(a, b):
+        if len(fs) < 2 or len(idx[b]["files"]) > 10:
+            continue
+        same_dir = homes[a] and homes[a] == homes[b]
+        if same_dir or (fan_in[b] <= _FANIN_HUB and _ancestor_ok(a, b)):
             n_dir += union(b, a)
 
     # 3) a self-contained subtree is ONE tool/feature however many stem families live
@@ -361,7 +414,7 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
     for d in sorted(anc, key=lambda x: (-x.count("/"), x)):
         members = sorted(anc[d])
         roots = sorted({find(m) for m in members})
-        if len(roots) < 2 or sum(size[r] for r in roots) > _SUBTREE_MAX:
+        if len(roots) < 2:
             continue
         mem = set(members)
         internal = external = 0
@@ -371,8 +424,31 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
                     internal += len(fs)
                 else:
                     external += len(fs)
-        need = 0.75 if sum(size[r] for r in roots) > 200 else 0.6
-        if internal >= 2 and internal / max(1, internal + external) >= need:
+        # inbound = references INTO this subtree from outside it. A subtree nothing
+        # else imports from is a LEAF PRODUCT (a standalone tool): it may collapse
+        # whole, however large. A subtree others depend on hosts shared features
+        # (Client/UserInterface) and must stay decomposed.
+        total = sum(size[r] for r in roots)
+        if total > _LEAF_MAX:
+            continue
+        # Two ways a subtree is ONE product, both evidence-based (measured on
+        # void-queue, see _SEM_FLOOR):
+        #   a) its unit labels all describe one thing (>= _SEM_FLOOR) — an unmistakable
+        #      tool/library (GrannyPreprocessor 0.96, RHI 0.88);
+        #   b) it is semantically coherent-ish AND a LEAF: nothing outside imports from
+        #      it, so it cannot be hosting features others build on (WorldEditor 0.75,
+        #      no inbound). A shared library (GameLibrary 0.72, imported by the UI) or
+        #      a feature home (Server/game 0.69, Client-Files/root 0.69) fails both.
+        inbound = sum(len(fs) for (a, b), fs in refs_of.items()
+                      if b in mem and a not in mem)
+        ratio = internal / max(1, internal + external)
+        names = [idx[m]["name"] for m in members]
+        one_product = (
+            internal >= 2 and ratio >= 0.5
+            and (_cohesive_semantics(provider, names, _SEM_FLOOR)
+                 or (inbound == 0
+                     and _cohesive_semantics(provider, names, _SEM_LEAF_FLOOR))))
+        if one_product:
             base = roots[0]
             for r in roots[1:]:
                 ra, rb = find(base), find(r)
@@ -621,7 +697,10 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 "name": name,
                 "tier": 4 if (kind == "design" and d["idents"]) else 2,
                 "doc_kind": kind,
-                "doc_only": kind == "meta" or not corro,
+                # ONLY a design doc defines a feature. How-tos and meta pages are
+                # sources ABOUT features: they merge into the code they corroborate
+                # (code wins the name, doc joins the territory) or shelve as docs.
+                "doc_only": kind != "design" or not corro,
                 "definition": (f"[{d['title']}] " + d["excerpt"].replace("\n", " "))[:400],
                 "files": [d["path"]],
                 "stems": (path_stems(d["path"]) | d["idents"]) if kind != "meta"
