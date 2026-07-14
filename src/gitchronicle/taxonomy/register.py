@@ -386,16 +386,25 @@ def _consolidate_units(conn, repo: str, entries: list[dict], provider, keep_key,
         if fan_in[a] <= _FANIN_HUB and fan_in[b] <= _FANIN_HUB and _ancestor_ok(a, b):
             n_mut += union(a, b)
 
-    # 2) a small fragment folds into the unit that uses it (accessor -> its system).
-    #    Inside ONE directory locality beats the hub guard: a base class its siblings
-    #    all derive from is the core of that system, not shared infrastructure — the
-    #    fan-in guard only protects genuinely cross-directory hubs.
+    # 2) a small fragment folds into the system that uses it — but ONLY when that
+    #    system is the sole user. A fragment used by exactly one cluster belongs to it
+    #    (a base class its siblings derive from); a small unit used by MANY clusters is
+    #    shared infrastructure — a framework — and must stand on its own. (Luna's
+    #    package root is one file imported by 25 UI modules: absorbing it into whichever
+    #    module happened to reference it first erased the framework from the register.)
+    users_of: dict[int, set] = defaultdict(set)
+    for (a, b), fs in refs_of.items():
+        if len(fs) >= 2:
+            users_of[b].add(a)
     n_dir = 0
-    for (a, b), fs in sorted(refs_of.items()):
-        if len(fs) < 2 or len(idx[b]["files"]) > 10:
+    for b, users in sorted(users_of.items()):
+        if len(idx[b]["files"]) > 10:
             continue
-        same_dir = homes[a] and homes[a] == homes[b]
-        if same_dir or (fan_in[b] <= _FANIN_HUB and _ancestor_ok(a, b)):
+        homes_of_users = {find(u) for u in users}
+        if len(homes_of_users) != 1:
+            continue                      # used by several systems: shared, keep it
+        a = sorted(users)[0]
+        if homes[a] == homes[b] or _ancestor_ok(a, b):
             n_dir += union(b, a)
 
     # 3) a self-contained subtree is ONE tool/feature however many stem families live
