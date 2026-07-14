@@ -250,13 +250,11 @@ def _keep_key(name: str, keys: set) -> str:
 _CLUSTER_CAP = 120      # a consolidated feature never exceeds this (anti-blob)
 _SUBTREE_MAX = 800      # self-contained subtree collapses to one entry up to this
 _LEAF_MAX = 2500        # hard ceiling on any collapsed subtree
-_SEM_FLOOR = 0.78       # mean cosine of member labels to their centroid. Measured on
-                        # void-queue: unmistakable tools/libs 0.78-0.96 (every unit is a
-                        # facet of one thing); feature homes 0.69 (Server/game hosts
-                        # affect, battle, guild...). Below the floor: stay decomposed.
-_SEM_LEAF_FLOOR = 0.74  # a LEAF subtree (nothing imports from it) only needs to be
-                        # coherent-ish to be one product: WorldEditor 0.75. Shared libs
-                        # (GameLibrary 0.72, imported by the UI) never qualify.
+_QUIET_SHARE = 0.01     # a subtree touched by <= 1% of the project's commits was never
+                        # the SITE of development: it arrived as a unit (a tool, an
+                        # imported library) and is ONE artifact. Measured on void-queue:
+                        # tools 1 commit; Client/UserInterface 141; Server/game 452 —
+                        # feature homes are hammered continuously, tools are not.
 _FANIN_HUB = 8          # units referenced by this many others are infrastructure, not fragments
 
 
@@ -276,30 +274,18 @@ def _home_dir(files: list[str]) -> str:
     return "/".join(pre)
 
 
-def _cohesive_semantics(provider, names: list[str], floor: float) -> bool:
-    """Do these peek labels describe ONE system? Structural cohesion cannot tell a
-    standalone tool (every unit is a facet of the same thing) from a well-modularised
-    layer (Server/game: affect, battle, guild, skill — dozens of features that of
-    course reference each other). The labels themselves carry that distinction."""
-    import numpy as np
-    if len(names) < 2:
-        return True
-    try:
-        V = provider.embed(names[:40])
-    except Exception:  # noqa: BLE001
-        return False                       # no evidence => do not collapse
-    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
-    c = V.mean(0)
-    c /= (np.linalg.norm(c) + 1e-9)
-    return float((V @ c).mean()) >= floor
-
-
-def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) -> list[dict]:
+def _consolidate_units(conn, repo: str, entries: list[dict], provider, keep_key,
+                       log) -> list[dict]:
     """Merge peek-labelled units the IMPORT GRAPH proves are one system. Stem kinship
     carves structure; use defines features — an abstract-renderer header and its
     renderers, or a tool's subtree, are one feature however the basenames family.
-    Locality (common ancestor dir) + size caps keep this from ever building blobs."""
-    idx = [e for e in entries if not e.get("vendored") and len(e["files"]) <= 300]
+    Locality (common ancestor dir) + size caps keep this from ever building blobs.
+
+    The graph is built over ALL units (a tool's own files reference the SDK headers it
+    bundles — drop those and its cohesion vanishes), but a cluster MATERIALISES per
+    class: a tool that bundles an SDK sample tree yields its own feature plus one
+    third-party entry, never one blob that buries the owner's tool in the shelf."""
+    idx = [e for e in entries if len(e["files"]) <= 300]
     pos = {id(e): i for i, e in enumerate(idx)}
     own: dict[str, int] = {}
     by_base: dict[str, list[int]] = defaultdict(list)
@@ -350,6 +336,19 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
 
     homes = [_home_dir(e["files"]) for e in idx]
     fan_in = Counter(b for (_, b) in refs_of)
+
+    # how many distinct commits ever touched each unit (the density evidence)
+    total = conn.execute("SELECT COUNT(*) FROM commits WHERE is_merge=0").fetchone()[0]
+    quiet_max = max(3, int(total * _QUIET_SHARE))
+    owner_of: dict[str, int] = {}
+    for i, e in enumerate(idx):
+        for f in e["files"]:
+            owner_of.setdefault(f, i)
+    commits_of: dict[int, set] = defaultdict(set)
+    for r in conn.execute("SELECT path, commit_hash FROM commit_files"):
+        i = owner_of.get(r["path"])
+        if i is not None:
+            commits_of[i].add(r["commit_hash"])
 
     def _ancestor_ok(a: int, b: int) -> bool:
         ha, hb = homes[a], homes[b]
@@ -431,24 +430,14 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
         total = sum(size[r] for r in roots)
         if total > _LEAF_MAX:
             continue
-        # Two ways a subtree is ONE product, both evidence-based (measured on
-        # void-queue, see _SEM_FLOOR):
-        #   a) its unit labels all describe one thing (>= _SEM_FLOOR) — an unmistakable
-        #      tool/library (GrannyPreprocessor 0.96, RHI 0.88);
-        #   b) it is semantically coherent-ish AND a LEAF: nothing outside imports from
-        #      it, so it cannot be hosting features others build on (WorldEditor 0.75,
-        #      no inbound). A shared library (GameLibrary 0.72, imported by the UI) or
-        #      a feature home (Server/game 0.69, Client-Files/root 0.69) fails both.
-        inbound = sum(len(fs) for (a, b), fs in refs_of.items()
-                      if b in mem and a not in mem)
+        # A subtree is ONE product when it is internally coherent AND the project
+        # barely touched it: development density, not naming, tells a tool (arrived
+        # whole, never iterated) from a feature home (Server/game: 452 commits of
+        # affect, battle, guild...). Naming cannot: raw peek labels inside a tool are
+        # as diverse as anywhere else.
         ratio = internal / max(1, internal + external)
-        names = [idx[m]["name"] for m in members]
-        one_product = (
-            internal >= 2 and ratio >= 0.5
-            and (_cohesive_semantics(provider, names, _SEM_FLOOR)
-                 or (inbound == 0
-                     and _cohesive_semantics(provider, names, _SEM_LEAF_FLOOR))))
-        if one_product:
+        touched = len({h for i in members for h in commits_of.get(i, ())})
+        if internal >= 2 and ratio >= 0.5 and touched <= quiet_max:
             base = roots[0]
             for r in roots[1:]:
                 ra, rb = find(base), find(r)
@@ -485,20 +474,28 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
     for r, members in sorted(clusters.items()):
         if len(members) < 2:
             continue
-        ms = [idx[i] for i in members]
-        base = max(ms, key=lambda m: (len(m["files"]), m["name"]))
-        keys = {m["key"] for m in ms if m.get("key")}
-        e = {**base,
-             "name": keep_key(base["name"], keys),
-             "files": sorted(dict.fromkeys(f for m in ms for f in m["files"])),
-             "stems": set().union(*(m["stems"] for m in ms)),
-             "tier": max(m["tier"] for m in ms),
-             "_ckeys": keys,
-             "_members": [m["name"] for m in ms][:8]}
-        merged_ids.update(id(m) for m in ms)
-        out.append(e)
-        if len(ms) >= 3:
-            renamed.append(e)
+        allms = [idx[i] for i in members]
+        for vend in (False, True):
+            ms = [m for m in allms if bool(m.get("vendored")) is vend]
+            if not ms:
+                continue
+            merged_ids.update(id(m) for m in ms)
+            if len(ms) == 1:
+                out.append(ms[0])          # lone member of its class: unchanged
+                continue
+            base = max(ms, key=lambda m: (len(m["files"]), m["name"]))
+            keys = {m["key"] for m in ms if m.get("key")}
+            e = {**base,
+                 "name": keep_key(base["name"], keys),
+                 "files": sorted(dict.fromkeys(f for m in ms for f in m["files"])),
+                 "stems": set().union(*(m["stems"] for m in ms)),
+                 "tier": max(m["tier"] for m in ms),
+                 "vendored": vend,
+                 "_ckeys": keys,
+                 "_members": [m["name"] for m in ms][:8]}
+            out.append(e)
+            if len(ms) >= 3 and not vend:
+                renamed.append(e)
     # name genuinely multi-part clusters at feature altitude (one cheap batch)
     for i in range(0, len(renamed), 12):
         chunk = renamed[i:i + 12]
@@ -524,8 +521,8 @@ def _consolidate_units(repo: str, entries: list[dict], provider, keep_key, log) 
         except Exception:  # noqa: BLE001
             continue
     kept = [e for e in entries if id(e) not in merged_ids]
-    log(f"  consolidation: {n_dup} duplicate + {n_mut} mutual + {n_dir} fragment + "
-        f"{n_sub} subtree + {n_mop} mop-up unions "
+    log(f"  consolidation: {n_dup} dup + {n_mut} mutual + {n_dir} fragment + "
+        f"{n_sub} subtree + {n_mop} mop-up "
         f"-> {len(entries)} units => {len(kept) + len(out)} entries")
     return kept + out
 
@@ -640,7 +637,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
 
     # import-graph consolidation: stem carving fragments real systems (an abstract
     # renderer vs its pipeline, a tool subtree); use-evidence reunites them
-    entries = _consolidate_units(repo, entries, provider, _keep_key, log)
+    entries = _consolidate_units(conn, repo, entries, provider, _keep_key, log)
 
     # docs are EVIDENCE about features, not features. A doc only becomes a register
     # entry in its own right when it genuinely DEFINES a system (design doc); how-tos
