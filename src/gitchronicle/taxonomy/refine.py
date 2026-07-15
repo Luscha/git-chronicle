@@ -51,6 +51,47 @@ def _recurring(name: str, cons) -> bool:
 _KEY_SUFFIX_RE = re.compile(r"\(([A-Za-z0-9_]{4,})\)\s*$")
 
 
+_SRC_EXT = {"c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "py", "pyw", "lua",
+            "cs", "js", "mjs", "ts", "tsx", "jsx", "java", "go", "rs", "rb", "php"}
+
+
+def promote_evidenced_docs(conn, log=print, min_commits: int = 2) -> int:
+    """A doc-only entity that history keeps assigning CODE commits to is not a doc:
+    it is the feature whose code the register mis-homed (the design doc was the only
+    entity that truthfully described it). Attribution evidence outranks the
+    register-time verdict — promote it and let `check` surface the territory conflict."""
+    import json as _json
+    n = 0
+    for r in conn.execute("SELECT id, name, stems FROM domains WHERE classification='doc-only' "
+                          "AND status IN ('named','provisional')").fetchall():
+        # gate on NAME tokens, not stems: corroboration enriches a doc's stems with
+        # real code identifiers by design, so stems match everything — the entity's
+        # own name appearing in the code FILENAMES is the evidence that survives
+        estems = {w for w in re.findall(r"[a-z0-9]{3,}", r["name"].lower())
+                  if w not in ("the", "and", "system", "manager", "management",
+                               "plan", "design", "guide", "documentation")}
+        code_commits = 0
+        for x in conn.execute("SELECT files FROM concerns WHERE domain_id=?", (r["id"],)):
+            fs = _json.loads(x["files"] or "[]")
+            src = [f for f in fs if f.rsplit(".", 1)[-1].lower() in _SRC_EXT]
+            if not fs or len(src) * 2 <= len(fs):
+                continue
+            # the code must be ON-TOPIC: its stems must meet the entity's own stems —
+            # a meta-doc that merely attracted stray commits must not become a feature
+            on_topic = any(estems & set(re.findall(r"[a-z0-9]{3,}",
+                                                   f.rsplit("/", 1)[-1].lower()))
+                           for f in src)
+            if on_topic:
+                code_commits += 1
+        if code_commits >= min_commits:
+            conn.execute("UPDATE domains SET classification='feature' WHERE id=?", (r["id"],))
+            log(f"  doc-only promoted by code evidence: {r['name'][:50]} "
+                f"({code_commits} code commits)")
+            n += 1
+    conn.commit()
+    return n
+
+
 def refine_descriptions(conn, provider, log=print, min_commits: int = 3,
                         batch: int = 10) -> dict:
     rows = conn.execute(
