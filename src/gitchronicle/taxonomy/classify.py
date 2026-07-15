@@ -593,6 +593,9 @@ def build_taxonomy(conn, provider, cfg: dict, git_head: str | None, rev_range: s
                         force=bool(cat.get("reregister")))
     r2 = classify(conn, provider, cfg, git_head, rev_range,
                   frozen=bool(cat.get("frozen")), force=bool(cat.get("reclassify")), log=log)
+    # history refines the identity card (text-only) once attribution exists
+    from .refine import refine_descriptions
+    refine_descriptions(conn, provider, log=log)
     n_feat = conn.execute("SELECT COUNT(*) FROM domains "
                           "WHERE status IN ('named','provisional','confirmed')").fetchone()[0]
     log(f"  {n_feat} features")
