@@ -682,8 +682,12 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 e["data"] = True          # majority of files are named-by-code data
                 n_data += 1
                 continue
-            head = treader.read("HEAD", fs[0], limit=400) or ""
-            if _GENERATED_RE.search(head):
+            # an entry is generated when MOST of it is — one protobuf stub in an
+            # otherwise hand-written feature must not condemn the feature
+            probe = sorted(fs)[:5]
+            gen = sum(1 for f in probe
+                      if _GENERATED_RE.search(treader.read("HEAD", f, limit=400) or ""))
+            if gen * 2 > len(probe):
                 e["generated"] = True
                 n_gen += 1
     finally:
