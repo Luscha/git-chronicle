@@ -802,26 +802,35 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         parts = f.split("/")
         return "/".join(parts[:2]) if len(parts) > 2 else parts[0]
 
+    # code entities seed and absorb; DOCS never serve as homes — a design doc with
+    # generic corroborated identifiers seeded a 400-file eight-component blob. A doc
+    # merges into its single BEST code home and donates its tier-4 naming rights there.
+    is_doc = lambda d: bool(d.get("doc_kind") or d.get("doc_only"))
     merged: list[dict] = []
-    for e in sorted(entries, key=lambda d: -d["tier"]):
+    for e in sorted(entries, key=lambda d: (is_doc(d), -d["tier"])):
         nest = _norm_stems(e["stems"] - god)
         ecomp = {_comp(f) for f in e["files"][:40]}
         home = None
+        best = 0.0
         for m in merged:
-            # stems are a proxy; a shared stem across COMPONENTS is a coincidence, not
-            # a feature (one 400-file entry fused uiscript + quests + a python toolkit)
-            if not (ecomp & m["_comp"]):
+            # component sets are FROZEN at seed time: any accumulating field re-opens
+            # the accretion door (docs are exempt — they cross components by nature)
+            if not is_doc(e) and not (ecomp & m["_comp"]):
                 continue
-            # match against the SEED's stems, never the accumulated union — otherwise
-            # every absorption widens the net and unrelated units chain into one blob
+            if is_doc(m):
+                continue
             small = min(len(nest), len(m["_seed"])) or 1
             ov = nest & m["_seed"]
-            # different coined identifiers = different features, whatever the overlap
             if e.get("key") and m.get("key") and e["key"] != m["key"]:
                 continue
             if (len(ov) >= 2 or any(" " in s for s in ov)) and len(ov) * 2 >= small:
-                home = m
-                break
+                score = len(ov) / small
+                if is_doc(e):
+                    if score > best:      # a doc attaches to its BEST home, not the first
+                        best, home = score, m
+                else:
+                    home = m
+                    break
         if home is None:
             merged.append({**e, "_norm": nest, "_seed": frozenset(nest),
                            "_comp": ecomp,
@@ -830,7 +839,6 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         else:
             home["files"] = list(dict.fromkeys(home["files"] + e["files"]))
             home["_norm"] |= nest
-            home["_comp"] |= ecomp
             home["stems"] |= e["stems"]
             if e.get("key"):
                 home["_keys"].add(e["key"])
