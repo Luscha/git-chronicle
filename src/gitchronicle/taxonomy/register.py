@@ -1016,6 +1016,29 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             x = root[x]
         return x
 
+    # anchors first absorb anything living INSIDE their territory (a design doc
+    # duplicate, a stray sub-unit); direction is one-way — an anchor is never absorbed
+    anchor_files: dict[int, set] = {i: set(e["files"]) for i, e in enumerate(final)
+                                    if e.get("anchor")}
+    absorbed: set = set()
+    for i, e in enumerate(final):
+        if e.get("anchor") or e.get("inherited") or e.get("ack"):
+            continue
+        fs = [f for f in e["files"] if f not in boiler]
+        if not fs:
+            continue
+        for ai, af in anchor_files.items():
+            inside = sum(1 for f in fs if f in af)
+            if inside / len(fs) >= 0.7:
+                a = final[ai]
+                a["files"] = list(dict.fromkeys(a["files"] + e["files"]))
+                a["stems"] |= e["stems"]
+                absorbed.add(i)
+                break
+    if absorbed:
+        log(f"  anchors absorbed {len(absorbed)} contained entries")
+        final = [e for i, e in enumerate(final) if i not in absorbed]
+
     inv: dict[str, list[int]] = defaultdict(list)
     for i, e in enumerate(final):
         if e.get("anchor") or e.get("inherited") or e.get("ack"):
