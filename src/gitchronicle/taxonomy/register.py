@@ -906,6 +906,14 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
                 continue
             if is_doc(m):
                 continue
+            if is_doc(e) and m.get("anchor"):
+                # a doc joins a FRAMEWORK only by naming it — stem soup is how
+                # questlua_affect.md ended up inside the Augments anchor
+                key = (m.get("key") or "").lower()
+                base = key[:-1] if key.endswith("s") else key
+                fn = " ".join(e["files"])[:400].lower() + " " + e["name"].lower()
+                if not key or (key not in fn and base not in fn):
+                    continue
             small = min(len(nest), len(m["_seed"])) or 1
             ov = nest & m["_seed"]
             if e.get("key") and m.get("key") and e["key"] != m["key"]:

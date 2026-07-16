@@ -144,6 +144,11 @@ def claim_territory(anchors: dict[str, dict], authored: list[str]) -> dict[str, 
     (libluna, PythonLunaModule carry 'luna'). A file inside the framework's DIRECTORY
     belongs to it over a filename match (luna/forge_game.cpp is luna's before forge's);
     ties break by match strength, then token length, then lexicographic."""
+    def _match(t: str, toks: set) -> bool:
+        # singular/plural morphology: 'augments' claims uiAugmentChoice
+        base = t[:-1] if t.endswith("s") else t
+        return any(t in x or base in x for x in toks)
+
     claims: dict[str, list[str]] = defaultdict(list)
     for f in authored:
         low = f.lower()
@@ -151,16 +156,19 @@ def claim_territory(anchors: dict[str, dict], authored: list[str]) -> dict[str, 
         dtoks = set()
         for seg in segs[:-1]:
             dtoks |= _tokens(seg)
-        ftoks = _tokens(segs[-1])
+        # the EXTENSION is the language, never the owner: eve_manager.forge is an eve
+        # system written IN forge, not part of the forge framework
+        fname = segs[-1].rsplit(".", 1)[0]
+        ftoks = _tokens(fname)
         best = None
         for t in anchors:
             if t in dtoks:
                 score = (4, len(t))
-            elif any(t in d for d in dtoks):
+            elif _match(t, dtoks):
                 score = (3, len(t))
             elif t in ftoks:
                 score = (2, len(t))
-            elif any(t in x for x in ftoks):
+            elif _match(t, ftoks):
                 score = (1, len(t))
             else:
                 continue
