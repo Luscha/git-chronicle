@@ -1,37 +1,43 @@
 """AUTHORED DELTA — the first partition of a fork's worktree is inherited vs authored.
 
-void-queue derives from Metin2: a large share of HEAD arrived in import/reorg blob
-commits and was never meaningfully touched again. That code is the OWNER'S BASELINE,
-not their features — v0.1 catalogued it as feature material and produced god features
-from vanilla code ('Guild Diplomacy and War System' = inherited PythonGuild bindings).
+void-queue derives from Metin2: much of HEAD arrived in import/sync/reorg blob commits
+and was never the owner's work. v0.1 catalogued it all as feature material and produced
+god features from vanilla code ('Guild Diplomacy and War System' = inherited
+PythonGuild bindings).
 
-Evidence, all from git:
-  - blob commits: the founding import + any commit touching > _BLOB_FILES files
-    (imports, vendor drops, reorgs — Hindle et al.: large commits are not feature work)
-  - a file's authored touches = distinct non-blob commits that changed it, counted
-    through its rename chain (the dev/ -> root restructure must not launder history)
+klass — CREATION PROVENANCE with rename chains (the dev/ -> root restructure must not
+launder history). Touch counts are NOT authorship (PythonGuild.cpp: 25 maintenance
+touches, never the owner's feature; god-files collect hundreds). The owner's features
+ADD files.
 
-klass — CREATION PROVENANCE ONLY. Touch counts are not authorship: PythonGuild.cpp
-collected 25 maintenance touches and guild_war.cpp 44 without ever being the owner's
-feature, while god-files (char.cpp, 569) accumulate touches from every feature passing
-through. The owner's features ADD files; edits to inherited files are maintenance whose
-story attributes elsewhere.
-  authored  — the file's rename-chain ROOT was ADDED by a non-blob commit
-  inherited — it arrived in a blob (founding import, vendor drop, reorg)
+  authored  — the file's rename-chain ROOT was added by a work commit
+  inherited — it arrived via the founding import or an import-majority mega drop
+
+Mega drops (> _BLOB_FILES files) are judged by their untangled content: majority
+import-origin concerns = a drop (locale syncs, vendor updates); majority work = the
+owner's own mega feature commit (CCC: 1,857 files). Files born INSIDE an import drop
+are rescued when either (a) a work concern lists them, or (b) their directory became a
+DEVELOPMENT SITE right after birth (>= _DEV_SITE_MIN later work commits touch it) —
+uchtml was born inside a 98%-import wiki drop and then actively developed; a locale
+drop never is.
 """
 
 from __future__ import annotations
 
+import json
+from collections import defaultdict
+
 from ..extract.git_ingest import run_git
 
-_BLOB_FILES = 200
+_BLOB_FILES = 150
+_DEV_SITE_MIN = 3
 
 
 def history_scan(repo: str):
     """One pass over --all: per path, the (date, commit) that first ADDED it, plus the
     rename parent map. Deterministic; ~seconds on 6.5k commits."""
-    first: dict[str, tuple[str, str]] = {}      # path -> (date, adding commit)
-    parent: dict[str, tuple[str, str]] = {}     # new -> (old, date)
+    first: dict[str, tuple[str, str]] = {}
+    parent: dict[str, tuple[str, str]] = {}
     date = commit = ""
     out = run_git(repo, ["-c", "diff.renameLimit=100000", "log", "--all",
                          "--find-renames", "--diff-filter=AR", "--name-status",
@@ -56,7 +62,6 @@ def history_scan(repo: str):
 
 
 def _aliases(path: str, parent: dict) -> list[str]:
-    """The path plus every historical name it had (rename chain, cycle-guarded)."""
     out, seen = [path], {path}
     p = path
     for _ in range(32):
@@ -72,22 +77,55 @@ def _aliases(path: str, parent: dict) -> list[str]:
 
 def file_authorship(conn, repo: str, files: list[str], log=print) -> dict[str, str]:
     """path -> 'authored' | 'inherited' for the given worktree files."""
-    blob_hashes = {r[0] for r in conn.execute(
+    big = [r[0] for r in conn.execute(
         "SELECT commit_hash FROM commit_files GROUP BY commit_hash "
-        "HAVING COUNT(*) > ?", (_BLOB_FILES,))}
+        "HAVING COUNT(*) > ?", (_BLOB_FILES,))]
+    blob_hashes: set = set()
+    work_at: dict[str, set] = {}
+    for h in big:
+        work: set = set()
+        tot = imp = 0
+        for r in conn.execute("SELECT files, origin FROM concerns WHERE commit_hash=?", (h,)):
+            tot += 1
+            if (r["origin"] or "") in ("import", "import-misc"):
+                imp += 1
+            else:
+                work.update(json.loads(r["files"] or "[]"))
+        if tot and imp / tot < 0.5:
+            continue                        # majority-work mega drop = the owner's work
+        blob_hashes.add(h)
+        if work:
+            work_at[h] = work
     founding = conn.execute(
         "SELECT hash FROM commits WHERE is_merge=0 ORDER BY authored_at LIMIT 1").fetchone()
     if founding:
         blob_hashes.add(founding[0])
+        work_at.pop(founding[0], None)      # the founding import births nothing
+
+    # development-site evidence: which directories the owner's WORK commits touched
+    dir_work: dict[str, set] = defaultdict(set)
+    for r in conn.execute("SELECT path, commit_hash FROM commit_files"):
+        if r[1] not in blob_hashes:
+            dir_work[r[0].rsplit("/", 1)[0]].add(r[1])
 
     first, parent = history_scan(repo)
+    fh = founding[0] if founding else ""
     out: dict[str, str] = {}
     n_auth = 0
     for f in files:
         root = _aliases(f, parent)[-1]
         added_by = (first.get(root) or ("", ""))[1]
-        out[f] = "authored" if added_by and added_by not in blob_hashes else "inherited"
-        n_auth += out[f] == "authored"
+        if added_by and added_by not in blob_hashes:
+            klass = "authored"
+        elif added_by and root in work_at.get(added_by, ()):
+            klass = "authored"              # a work concern inside an import drop
+        elif added_by and added_by != fh \
+                and len(dir_work.get(root.rsplit("/", 1)[0], ())) >= _DEV_SITE_MIN:
+            klass = "authored"              # born in a drop, then actively developed
+        else:
+            klass = "inherited"
+        out[f] = klass
+        n_auth += klass == "authored"
     log(f"  delta: {n_auth}/{len(files)} files authored, "
-        f"{len(files) - n_auth} inherited ({len(blob_hashes)} blob commits excluded)")
+        f"{len(files) - n_auth} inherited ({len(blob_hashes)} blob commits)")
     return out
