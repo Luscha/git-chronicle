@@ -239,9 +239,12 @@ function setNav() {
 }
 $("bF").onclick = () => { view = "features"; setNav(); route(); };
 $("bJ").onclick = () => { view = "journey"; setNav(); route(); };
+const allHashes = new Set();
+for (const r of DATA) for (const c of r.commits) allHashes.add(c.hash);
 $("counts").textContent = DATA.length + " features · "
   + DATA.filter(r => r.commits.length).length + " with history · "
-  + DATA.reduce((a, r) => a + r.commits.length, 0) + " attributed commits";
+  + DATA.reduce((a, r) => a + r.commits.length, 0) + " attributions across "
+  + allHashes.size + " commits";
 route();
 </script>
 </body>

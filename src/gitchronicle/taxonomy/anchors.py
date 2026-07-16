@@ -130,7 +130,12 @@ def discover_anchors(repo: str, authored: list[str], inherited: list[str],
     # a few vanilla files carrying the token is coincidence (a luna_park monster);
     # many is structure ('game', 'quest', 'guild') — counted in FILES because vanilla
     # Metin2 is flat (thousands of files in a handful of dirs)
-    anchors = {t: a for t, a in anchors.items() if vanfiles.get(t, 0) <= 20}
+    # strong evidence (the owner registered/documented/imports the name) tolerates a
+    # few vanilla coincidences; NAMING-only evidence (dirs+fileprefix) must be strictly
+    # absent from vanilla — that is the difference between 'forge' and 'player'
+    strong = {"registration", "doctree", "imports"}
+    anchors = {t: a for t, a in anchors.items()
+               if vanfiles.get(t, 0) <= (20 if strong & set(a["evidence"]) else 0)}
     top = sorted(anchors, key=lambda t: (-len(anchors[t]["evidence"]),
                                          -len(anchors[t]["components"]), t))[:_MAX_ANCHORS]
     anchors = {t: anchors[t] for t in top}

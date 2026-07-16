@@ -615,12 +615,16 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
     # (frameworks claim cross-component territory by name), residue carves locally
     from .anchors import claim_territory, discover_anchors
     from .delta import file_authorship
-    scoped = [p for p in run_git(repo, ["ls-files"]).splitlines()
-              if p.strip() and scope(p)]
-    klass = file_authorship(conn, repo, scoped, log=log)
+    allfiles = [p for p in run_git(repo, ["ls-files"]).splitlines() if p.strip()]
+    klass = file_authorship(conn, repo, allfiles, log=log)
+    scoped = [p for p in allfiles if scope(p)]
     authored = [f for f in scoped if klass[f] == "authored"]
+    # coinage must be tested against the FULL vanilla corpus, not the scoped slice:
+    # the scope hides most of vanilla, and in the 2,872-file remnant 'config' looked
+    # coined — certifying a maximally generic token as the owner's identity
+    inherited_all = [f for f in allfiles if klass[f] == "inherited"]
     inherited = [f for f in scoped if klass[f] == "inherited"]
-    anchors = discover_anchors(repo, authored, inherited, log=log)
+    anchors = discover_anchors(repo, authored, inherited_all, log=log)
     claims = claim_territory(anchors, authored)
     claimed = {f for fs in claims.values() for f in fs}
     log(f"  anchors claim {len(claimed)} authored files across "

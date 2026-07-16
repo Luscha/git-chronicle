@@ -308,6 +308,32 @@ def classify(conn, provider, cfg: dict, git_head: str | None = None, rev_range: 
     # feature owns becomes ONE proposed feature (instead of N forced fits keeping the
     # NONE-rate deceptively low).
     if not frozen and len(ambiguous) >= int(cat.get("novelty_min", 4)):
+        # novelty exists to catch REAL features the register missed (removed ones like
+        # CCC). Orphans made of inherited/vendor files are not features — vanilla
+        # maintenance routes to the baseline, and boost headers must never mint
+        # 'Date and Time Handling System' again.
+        from .delta import file_authorship
+        allf = sorted({f for cid, _, _ in ambiguous for f in info[cid]["files"]})
+        aklass = file_authorship(conn, cfg.get("repo", {}).get("path", "."), allf,
+                                 log=lambda *a: None)
+        base_row = conn.execute("SELECT id FROM domains WHERE classification='inherited' "
+                                "AND status IN ('named','provisional') LIMIT 1").fetchone()
+        mintable, routed = [], 0
+        for cid, ctx, top in ambiguous:
+            fs = info[cid]["files"]
+            auth = sum(1 for f in fs if aklass.get(f) == "authored")
+            if fs and auth * 2 <= len(fs):
+                if base_row:
+                    conn.execute("UPDATE concerns SET domain_id=?, assign_source='baseline' "
+                                 "WHERE id=?", (base_row["id"], cid))
+                    routed += 1
+                continue
+            mintable.append((cid, ctx, top))
+        conn.commit()
+        if routed:
+            log(f"  novelty gate: {routed} inherited/vendor orphans -> baseline; "
+                f"{len(mintable)} authored orphans may mint")
+        ambiguous = mintable
         created, ambiguous = _batch_novelty(conn, provider, cfg, ambiguous, vec, info,
                                             feat_stems, names, run_id, log)
         if created:
