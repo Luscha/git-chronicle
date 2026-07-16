@@ -126,8 +126,11 @@ def build_relations(conn, repo: str, log=print) -> dict:
     hubs = []
     for did, cnt in used_by.most_common():
         if cnt >= _HUB_MIN_FANIN:
-            conn.execute("UPDATE domains SET classification='core', fan_in=? WHERE id=?",
-                         (cnt, did))
+            # hub promotion never overwrites a shelf class: inherited code is imported
+            # by everything — that makes it a dependency, not one of the owner's frameworks
+            conn.execute("UPDATE domains SET classification='core', fan_in=? WHERE id=? "
+                         "AND classification IN ('feature','core')", (cnt, did))
+            conn.execute("UPDATE domains SET fan_in=? WHERE id=?", (cnt, did))
             hubs.append((feats[did], cnt))
     conn.commit()
     log(f"  {n} uses-edges; hubs: " + (", ".join(f"{h} (used by {c})" for h, c in hubs[:6])
