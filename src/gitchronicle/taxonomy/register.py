@@ -45,11 +45,13 @@ _UNIT_MAX = 80         # bigger families get split by directory within the famil
 _PEEK_BATCH = 5
 
 
-def _worktree_units(repo: str, scope) -> tuple[dict[str, list[str]], list[str]]:
-    """Scoped worktree -> module units by global stem family (dir-split when huge)."""
+def _worktree_units(repo: str, scope,
+                    only: set | None = None) -> tuple[dict[str, list[str]], list[str]]:
+    """Scoped worktree -> module units by global stem family (dir-split when huge).
+    `only` restricts carving to a subset (v0.2: the authored, anchor-unclaimed residue)."""
     from ..untangle.untangle import _stem_families
     files = [p for p in run_git(repo, ["ls-files"]).splitlines()
-             if p.strip() and scope(p)]
+             if p.strip() and scope(p) and (only is None or p in only)]
     # code files only: dominant extensions of the scoped tree (data/assets excluded)
     extc = Counter(p.rsplit(".", 1)[-1].lower() for p in files if "." in p)
     code_exts = {e for e, n in extc.most_common(14)
@@ -146,7 +148,8 @@ def _doc_idents(text: str, code_stems: set) -> set:
 
 def _alias_pass(provider, final: list[dict], keep_key, log) -> list[dict]:
     import numpy as np
-    cand = [(i, m) for i, m in enumerate(final) if not m.get("ack")]
+    cand = [(i, m) for i, m in enumerate(final)
+            if not m.get("ack") and not m.get("anchor") and not m.get("inherited")]
     if len(cand) < 2:
         return final
     texts = [f"{m['name']}. {(m['definition'] or '')[:200]}" for _, m in cand]
@@ -594,7 +597,23 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         log(f"  register exists ({have} features) — use --force to rebuild")
         return {"register": have, "skipped": True}
 
-    units, leftover = _worktree_units(repo, scope)
+    # ---- v0.2: delta first (inherited never becomes a feature), anchors second
+    # (frameworks claim cross-component territory by name), residue carves locally
+    from .anchors import claim_territory, discover_anchors
+    from .delta import file_authorship
+    scoped = [p for p in run_git(repo, ["ls-files"]).splitlines()
+              if p.strip() and scope(p)]
+    klass = file_authorship(conn, repo, scoped, log=log)
+    authored = [f for f in scoped if klass[f] == "authored"]
+    inherited = [f for f in scoped if klass[f] == "inherited"]
+    anchors = discover_anchors(repo, authored, inherited, log=log)
+    claims = claim_territory(anchors, authored)
+    claimed = {f for fs in claims.values() for f in fs}
+    log(f"  anchors claim {len(claimed)} authored files across "
+        f"{len(claims)} identities")
+
+    units, leftover = _worktree_units(repo, scope,
+                                      only=set(authored) - claimed)
     log(f"  worktree: {len(units)} module units ({len(leftover)} un-familied files)")
 
     # peek-label every unit at HEAD
@@ -712,6 +731,60 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
     # import-graph consolidation: stem carving fragments real systems (an abstract
     # renderer vs its pipeline, a tool subtree); use-evidence reunites them
     entries = _consolidate_units(conn, repo, entries, provider, _keep_key, log)
+
+    # ---- anchor entries: the owner's frameworks, tier 5, cross-component territory.
+    # Peeked for a definition like any unit; protected from every merge/dedupe below
+    # (docs may merge INTO them — Doc/luna belongs to the luna anchor).
+    from ..untangle.untangle import _representative as _rep2
+    areader = BatchReader(repo)
+    try:
+        aitems = sorted(claims.items())
+        for i in range(0, len(aitems), _PEEK_BATCH):
+            part = aitems[i:i + _PEEK_BATCH]
+            blocks = []
+            for j, (key, fs) in enumerate(part):
+                ents = [f for f in fs
+                        if f.rsplit("/", 1)[-1].rsplit(".", 1)[0] in ("__init__", "index")]
+                rep = min(ents, key=lambda f: f.count("/")) if ents else                     _rep2(repo, "HEAD", key, fs, reader=areader)
+                head = areader.read("HEAD", rep, limit=_CODE_HEAD * 3)
+                blocks.append(f"[{j}] framework '{key}' ({rep.rsplit('/', 1)[-1]}, "
+                              f"{len(fs)} files across components):\n{head}")
+            try:
+                got = provider.chat(REGISTER_PEEK_SYS, "\n\n".join(blocks),
+                                    want_json=True, cache_extra=f"reg-anchor:{i}")
+            except Exception:  # noqa: BLE001
+                got = {}
+            labels = got.get("labels", {}) if isinstance(got, dict) else {}
+            for j, (key, fs) in enumerate(part):
+                r = labels.get(str(j)) or {}
+                name = str((r.get("name") if isinstance(r, dict) else "") or key).strip()[:70]
+                if name.lower() == "inconclusive":
+                    name = key
+                stems = set()
+                for f in fs[:20]:
+                    stems |= path_stems(f)
+                stems.add(key)
+                if key.lower() not in name.lower():
+                    name = f"{name} ({key})"[:70]
+                entries.append({"name": name, "tier": 5, "key": key, "anchor": True,
+                                "definition": str(r.get("definition") or "").strip()[:400],
+                                "files": fs, "stems": stems})
+    finally:
+        areader.close()
+
+    # ---- inherited baseline: catalogued, attributable, never features
+    bycomp2: dict[str, list[str]] = defaultdict(list)
+    for f in inherited:
+        parts = f.split("/")
+        bycomp2["/".join(parts[:2]) if len(parts) > 2 else parts[0]].append(f)
+    for comp, fs in sorted(bycomp2.items()):
+        if len(fs) >= 3:
+            entries.append({"name": f"{comp} (inherited baseline)"[:70], "tier": 1,
+                            "inherited": True, "doc_only": False,
+                            "definition": "code inherited from the upstream base; "
+                                          "maintenance only, not the owner's feature",
+                            "files": sorted(fs)[:400],
+                            "stems": set()})
 
     # docs are EVIDENCE about features, not features. A doc only becomes a register
     # entry in its own right when it genuinely DEFINES a system (design doc); how-tos
@@ -923,6 +996,8 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
 
     inv: dict[str, list[int]] = defaultdict(list)
     for i, e in enumerate(final):
+        if e.get("anchor") or e.get("inherited") or e.get("ack"):
+            continue
         for f in e["files"]:
             if f not in boiler:
                 inv[f].append(i)
@@ -985,9 +1060,11 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
             "VALUES (?,?,?,?,?,?,?,'named','auto')",
             (run_id, e["name"], _slug(e["name"]), e["definition"],
              json.dumps(sorted(e["stems"] - god)[:12]), len(e["files"]),
-             "vendored" if e.get("vendored")
+             "inherited" if e.get("inherited")
+             else "vendored" if e.get("vendored")
              else "generated" if e.get("generated")
              else "content" if e.get("data")
+             else "core" if e.get("anchor")
              else ("doc-only" if e.get("doc_only") else "feature"))).lastrowid
         conn.executemany("INSERT OR REPLACE INTO domain_files (domain_id, path, weight, source) "
                          "VALUES (?,?,1.0,'register')", [(did, f) for f in e["files"][:400]])

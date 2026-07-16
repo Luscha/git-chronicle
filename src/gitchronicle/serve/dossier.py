@@ -120,7 +120,7 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
         md += [f"- `{c['hash']}` {c['date']} {c['subject']}" for c in cs[:_COMMIT_CAP]]
         (out / f"{slug}.md").write_text("\n".join(md) + "\n")
 
-        if d["classification"] != "vendored":
+        if d["classification"] not in ("vendored", "inherited"):
             journey.append((cs[0]["date"], d["name"], slug, len(cs),
                             bool(rec["used_by"]) and len(rec["used_by"]) >= 3))
         written += 1

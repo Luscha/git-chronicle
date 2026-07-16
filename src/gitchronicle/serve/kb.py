@@ -136,10 +136,11 @@ function renderList() {
   for (const r of DATA) {
     if (q && !(r.name.toLowerCase().includes(q) || r.definition.toLowerCase().includes(q)))
       continue;
-    if (r.classification === "vendored") { vul.append(itemLi(r, cur)); nv++; }
+    if (r.classification === "vendored" || r.classification === "inherited")
+      { vul.append(itemLi(r, cur)); nv++; }
     else ul.append(itemLi(r, cur));
   }
-  $("vsum").textContent = "Third-party (" + nv + ")";
+  $("vsum").textContent = "Third-party & inherited (" + nv + ")";
   $("vbox").style.display = nv ? "" : "none";
 }
 
@@ -207,7 +208,8 @@ function renderJourney() {
   const m = $("main"); m.textContent = "";
   m.append(el("h2", "", "Feature journey"));
   m.append(el("p", "sum", "Features by first attributed commit; ⭐ = framework hub."));
-  const dated = DATA.filter(r => r.commits.length && r.classification !== "vendored")
+  const dated = DATA.filter(r => r.commits.length && r.classification !== "vendored"
+    && r.classification !== "inherited")
     .map(r => [r.commits[0].date, r]).sort((a, b) => a[0] < b[0] ? -1 : 1);
   let year = "";
   for (const [d, r] of dated) {
