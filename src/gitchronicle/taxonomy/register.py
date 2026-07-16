@@ -868,7 +868,7 @@ def build_register(conn, provider, repo: str, cfg: dict, log=print,
         if len(docs) >= 2:
             idents = set().union(*(x["idents"] for x in docs))
             entries.append({"name": sub[:70], "tier": 4 if idents else 2,
-                            "doc_only": not idents,
+                            "doc_kind": "group", "doc_only": not idents,
                             "definition": ("documented system: "
                                            + "; ".join(x["title"] for x in docs[:5]))[:400],
                             "files": [x["path"] for x in docs],
