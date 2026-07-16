@@ -52,11 +52,25 @@ def _worktree_units(repo: str, scope,
     from ..untangle.untangle import _stem_families
     files = [p for p in run_git(repo, ["ls-files"]).splitlines()
              if p.strip() and scope(p) and (only is None or p in only)]
-    # code files only: dominant extensions of the scoped tree (data/assets excluded)
+    # code files only: dominant extensions of the scoped tree (data/assets excluded)...
     extc = Counter(p.rsplit(".", 1)[-1].lower() for p in files if "." in p)
     code_exts = {e for e, n in extc.most_common(14)
                  if e not in ("png", "jpg", "dds", "tga", "wav", "mp3", "bin", "dat",
                               "gif", "bmp", "ico", "ttf", "sub", "gr2", "mse", "msa")}
+    # ...plus the owner's COINED DSLs: an extension whose files are (almost) all
+    # authored is the owner's own language (.forge: 100% authored, and the single
+    # highest-signal file kind in the repo) — a popularity contest can never admit it
+    if only is not None:
+        n_by_ext: Counter = Counter()
+        a_by_ext: Counter = Counter()
+        for p in run_git(repo, ["ls-files"]).splitlines():
+            if "." in p:
+                e = p.rsplit(".", 1)[-1].lower()
+                n_by_ext[e] += 1
+                a_by_ext[e] += p in only
+        for e, n in n_by_ext.items():
+            if n >= 5 and a_by_ext[e] / n >= 0.9:
+                code_exts.add(e)
     files = [p for p in files if "." in p and p.rsplit(".", 1)[-1].lower() in code_exts]
     # families are COMPONENT-SCOPED: a stem family must never straddle two components
     # (Tools/WorldEditor vs Tools/SoundArranger), or the unit belongs to neither and
