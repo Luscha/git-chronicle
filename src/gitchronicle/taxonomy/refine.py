@@ -78,8 +78,9 @@ def promote_evidenced_docs(conn, log=print, min_commits: int = 2) -> int:
                 continue
             # the code must be ON-TOPIC: its stems must meet the entity's own stems —
             # a meta-doc that merely attracted stray commits must not become a feature
+            # the name may live in the filename OR the parent directory (luna/bind_*.cpp)
             on_topic = any(estems & set(re.findall(r"[a-z0-9]{3,}",
-                                                   f.rsplit("/", 1)[-1].lower()))
+                                                   "/".join(f.split("/")[-2:]).lower()))
                            for f in src)
             if on_topic:
                 code_commits += 1
