@@ -398,3 +398,151 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
         f"(blob={'yes' if blob else 'no'}, golden {n_gold}/3)")
     return {"clusters": len(clusters), "features": len(feats), "sizes": dict(sizes),
             "content": len(shelved), "blob": blob, "golden": golden, "pass": verdict}
+
+
+# ---- emit: name the clusters, write the v0.3 register to a fresh DB -----------
+
+_NAME_SYS = (
+    'You name features of a software repository for its knowledge base.\n'
+    'Given work-log labels (with counts) and file paths that all belong to ONE '
+    'feature or system, return JSON: {"name": ..., "definition": ...}.\n'
+    "Rules:\n"
+    "- name: 2-5 words, Title Case. If a coined key is given, keep it verbatim.\n"
+    "- definition: ONE sentence, present tense, saying what the system IS. Never "
+    "use change words (added/fixed/updated/refactored/removed).\n"
+    "- Derive only from the evidence given; do not invent scope.")
+
+
+def _cluster_prompt(cl: dict, work: list[dict]) -> str:
+    lab = "; ".join(f"{n}x {l}" for l, n in cl["labels"].most_common(8))
+    deg: Counter = Counter()
+    for i in cl["idxs"]:
+        for f in work[i]["files"]:
+            deg[f] += 1
+    paths = "\n".join(f"  {f}" for f, _ in deg.most_common(12))
+    parts = [f"active: {cl['born']}..{cl['last']}, {cl['commits']} commits, "
+             f"{len(cl['files'])} files"]
+    if cl["seed"]:
+        parts.append(f"coined key: {cl['seed']}")
+    if cl["dead"]:
+        parts.append("NOTE: all files deleted from the repository (a removed feature)")
+    if cl["content"]:
+        parts.append("NOTE: this is a data/content stream, not program code")
+    parts.append(f"work labels: {lab}")
+    parts.append(f"representative paths:\n{paths}")
+    return "\n".join(parts)
+
+
+def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) -> dict:
+    from pathlib import Path
+
+    from ..storage.schema import connect as db_connect, init_db
+
+    src_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    out_path = Path(out_db)
+    if out_path.exists():
+        out_path.unlink()
+    out = db_connect(out_db)
+    init_db(out)
+    out.execute("ATTACH ? AS s", (src_path,))
+    out.execute("PRAGMA foreign_keys=OFF")   # bulk copy; source rows are consistent
+    for t in ("commits", "commit_files", "commit_branches", "components", "eras"):
+        out.execute(f"INSERT INTO {t} SELECT * FROM s.{t}")
+    # concerns come over with the source run's domain assignments STRIPPED — this
+    # register is the only authority on attribution in the emitted DB
+    out.execute("INSERT INTO concerns (id, commit_hash, label, summary, files, kind, "
+                "origin) SELECT id, commit_hash, label, summary, files, kind, origin "
+                "FROM s.concerns")
+    out.commit()
+    out.execute("PRAGMA foreign_keys=ON")
+
+    work, alive = res["work"], res["alive"]
+    feats = [cl for cl in res["clusters"]
+             if cl["concerns"] >= _MIN_CONCERNS and cl["commits"] >= _MIN_COMMITS]
+
+    # territory is CONTESTED: a file belongs to the ONE cluster whose concerns
+    # touch it most (ties own nothing), and substrate/glue files — barred as
+    # clustering evidence — are barred as territory too. The naive union
+    # (every file any member concern touched) graded 56% ownership: luna's 700
+    # files swallowed interfacemodule.py and pvp_arena_manager.cpp wholesale.
+    barred = set(res["substrate"]) | set(res["glue"])
+    file_claims: dict[str, Counter] = defaultdict(Counter)
+    for ci, cl in enumerate(feats):
+        for i in cl["idxs"]:
+            for f in work[i]["files"]:
+                if f in cl["files"] and res["root_of"].get(f) not in barred:
+                    file_claims[f][ci] += 1
+    territory: dict[int, dict] = defaultdict(dict)
+    for f, claims in file_claims.items():
+        top = claims.most_common(2)
+        if len(top) > 1 and top[0][1] == top[1][1]:
+            continue                        # contested file: nobody's territory
+        territory[top[0][0]][f] = top[0][1]
+
+    log(f"  naming {len(feats)} clusters (LLM, cached)")
+    n_llm = 0
+    for ci, cl in enumerate(feats):
+        try:
+            j = provider.chat(_NAME_SYS, _cluster_prompt(cl, work), want_json=True)
+            name = str(j.get("name") or "").strip()[:80]
+            definition = str(j.get("definition") or "").strip()[:400]
+        except Exception as e:              # a failed name never blocks the register
+            name, definition = "", f"(naming failed: {e})"
+        if not name:
+            name = (cl["seed"] or f"family {cl['idxs'][0]}").title()
+        n_llm += 1
+        klass = "content" if cl["content"] else "feature"
+        stems = json.dumps(([cl["seed"]] if cl["seed"] else [])[:8])
+        cur = out.execute(
+            "INSERT INTO domains (name, definition, summary, stems, named_from, "
+            "classification, status, lifecycle, removed_at, born_at, first_seen, "
+            "last_seen, n_commits, n_files, created_by) "
+            "VALUES (?,?,?,?,?,?,'named',?,?,?,?,?,?,?, 'lineage')",
+            (name, definition, definition, stems, cl["concerns"], klass,
+             "removed" if cl["dead"] else "active",
+             cl["last"] if cl["dead"] else None,
+             cl["born"], cl["born"], cl["last"], cl["commits"], len(cl["files"])))
+        did = cur.lastrowid
+        out.executemany(
+            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source) "
+            "VALUES (?,?,?,?)",
+            [(did, f, float(n), "register" if alive(f) else "history")
+             for f, n in sorted(territory.get(ci, {}).items(), key=lambda kv: -kv[1])])
+        cw: Counter = Counter()
+        for i in cl["idxs"]:
+            cw[work[i]["commit"]] += 1
+        out.executemany(
+            "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, "
+            "source) VALUES (?,?,?,'lineage')",
+            [(h, did, float(n)) for h, n in sorted(cw.items())])
+
+    # the inherited baseline: maintenance on vanilla files, catalogued per component
+    comp_cons: dict[str, list[dict]] = defaultdict(list)
+    for c in res["base"]:
+        comp = Counter(f.split("/", 1)[0] for f in c["files"]).most_common(1)[0][0]
+        comp_cons[comp].append(c)
+    for comp, cs in sorted(comp_cons.items()):
+        if len(cs) < _MIN_CONCERNS:
+            continue
+        cur = out.execute(
+            "INSERT INTO domains (name, definition, classification, status, "
+            "n_commits, created_by) VALUES (?,?, 'inherited', 'named', ?, 'lineage')",
+            (f"Inherited baseline — {comp}",
+             f"Maintenance and fixes on inherited (pre-fork) code under {comp}/.",
+             len({c['commit'] for c in cs})))
+        did = cur.lastrowid
+        cw = Counter(c["commit"] for c in cs)
+        out.executemany(
+            "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, "
+            "source) VALUES (?,?,?,'baseline')",
+            [(h, did, float(n)) for h, n in sorted(cw.items())])
+    out.commit()
+
+    residue = sum(1 for cl in res["clusters"]
+                  if cl["concerns"] < _MIN_CONCERNS or cl["commits"] < _MIN_COMMITS)
+    n_dom = out.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
+    n_att = out.execute("SELECT COUNT(DISTINCT commit_hash) FROM commit_domains").fetchone()[0]
+    log(f"  {n_dom} domains ({n_llm} named), {n_att} distinct commits attributed; "
+        f"{residue} residue micro-clusters left unattributed")
+    out.close()
+    return {"domains": n_dom, "attributed": n_att, "residue": residue}
