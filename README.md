@@ -1,153 +1,105 @@
 # gitchronicle
 
-**Reconstruct a project's functional-feature *chronicles* from its git history** —
-into a queryable, navigable knowledge base you can explore and build a docs/blog
-site on top of.
+**Turn a repository into a browsable feature knowledge base** — every feature with
+its territory, its relations, its commit history, and (optionally) its narrated
+chronicle. Queryable SQLite underneath, self-contained HTML + markdown dossiers on
+top.
 
-`gitchronicle` reads a repository's commit history and answers a question a plain
-`git log` never can: *what features does this codebase have, and how did each one
-come to be?* It untangles every commit into the concrete changes it makes, groups
-those changes into the **functional features** they serve (Skills, Guild War,
-Login, Matchmaking, Rendering, …), and renders an interactive graph where every
-feature stays traceable back to its commits and files.
+`gitchronicle` answers what a plain `git log` never can: *what features does this
+codebase actually have, which of them are* ***mine*** *, and how did each one come
+to be?*
 
-> The tool produces the knowledge base. Turning it into a docs/blog/"requiem"
-> site is left to you — export `domains.json` and build on top of it.
-
----
-
-## The goal
-
-A **domain is a semantic, functional feature** — reconstructed from *what the
-changes do*, not from the filesystem layout. This distinction is the whole point:
-
-- A change to a god-class (`char.cpp`) that is *about skills* belongs to **Skills**;
-  the same file, changed *about potions*, belongs to **Potions**. Directory
-  structure is irrelevant — a feature spans client and server, UI and logic.
-- Features must be **isolable**: "Skill Tree" and "Skills" are distinct; a
-  potion-policy change is **Potions**, not swallowed into a generic "Player
-  Management" blob.
-- There is **no target count** — features *emerge* from the history; they are not
-  forced to a number.
-
-The output is a two-level hierarchy — **areas → domains (features) → commits &
-files** — plus an optional per-feature narrative *chronicle*.
-
-## Why not just read `git log`, or existing tools?
-
-Existing tools model your *current* code (call graphs, dependency graphs) or emit
-flat metrics/changelogs. None reconstruct a **temporal, feature-level narrative**
-grounded in what each commit actually did — across a god-class monolith where the
-filesystem tells you nothing about features. That gap is what this fills.
+> The tool produces the knowledge base. Turning it into a docs/blog/"requiem" site
+> is left to you — the per-feature `*.md`/`*.json` dossiers are built to be fed to
+> whatever writes prose.
 
 ---
 
-## How it works
+## The architecture (v0.2): identity from the worktree, narrative from history
 
-The pipeline is a sequence of resumable stages over a single SQLite file (the
-source of truth). Re-running any stage skips work already done.
+Earlier versions tried to *induce* features from commit clusters. Measured result:
+commits are changes, and a pile of changes is a poor definition of a thing. The
+current architecture inverts this, then lets history correct and enrich it:
 
 ```
- extract ─▶ signals ─▶ untangle ─▶ catalog ──────────────▶ attribute ─▶ lifecycle ─▶ index ─▶ graph
- (git)      (derive)   (LLM: 1     (induce taxonomy ONCE,   (map          (active/     (search)  (HTML +
-                        call/commit) then classify every      commits↔      dormant/              JSON)
-                                     concern BY ID)           domains)      removed)
-                                                                       └▶ [chronicle] (opt-in, LLM narrative)
+            WORKTREE  (what the code IS)                 HISTORY  (what happened)
+ ┌────────────────────────────────────────────┐   ┌─────────────────────────────────┐
+ │ delta    inherited vs authored (fork-aware) │   │ untangle  commit -> concerns    │
+ │ anchors  coined frameworks claim territory  │   │ classify  concerns -> features  │
+ │ carve    stem/pkg/dir units + consolidation │   │           (evidence-gated)      │
+ │ shelves  vendored/content/generated/docs    │   │ refine    history names things  │
+ └──────────────────┬─────────────────────────┘   │ chronicle narrated chapters     │
+                    │        the REGISTER          └───────────────┬─────────────────┘
+                    └──────────────┬───────────────────────────────┘
+                                   ▼
+                  SQLite KB  ->  kb.html + dossiers/*.md|json + index.md
 ```
 
-### The data model
+### 1. The authored delta (fork-aware grounding)
 
-| Unit | What it is |
-|---|---|
-| **Concern** | The atomic unit: one coherent change within a commit — a short capability label + the files it touches. A tangled commit produces several concerns. |
-| **Domain** | A functional **feature** — a cluster of concerns that serve the same capability, regardless of which files or subsystems they touch. |
-| **Area** | A broad grouping of related domains (e.g. *Combat*, *Items & Economy*, *Infrastructure & Tools*) — the top navigation layer. |
+For a fork, the first partition is not "feature vs vendored" — it is **inherited
+vs authored**. A file is *authored* iff its rename-chain root was added by a work
+commit; everything that arrived in the founding import or an import-majority mega
+drop is the **inherited baseline**: catalogued, attributable (your maintenance
+commits land there), but never presented as your feature. Touch counts are *not*
+authorship — inherited files collect fixes, authored files can be stable.
 
-### The stages
+### 2. Anchors (frameworks are cross-cutting by definition)
 
-1. **extract** — Parse the **default branch's full history**: commits, per-file
-   churn, parents, branches, and tags→eras. Full ancestry means every merged-PR
-   commit is included; never-merged feature branches are naturally excluded.
-2. **signals** — Cheap per-commit enrichment (connected components, conventional-
-   commit kind, …).
-3. **untangle** — The heart of the pipeline. **One LLM pass per commit** reads the
-   diff and splits it into *concerns* (label + one-sentence summary + files).
-   Adaptive routing keeps it cheap: a small, clean commit is labelled from its
-   message; a tangled/large/terse commit is escalated to read the (bounded) diff.
-   This is what lets a change to a god-class be attributed to the *feature* it
-   serves rather than the file it lives in.
-4. **catalog** — Two-phase feature reconstruction (the TnT-LLM / Clio shape:
-   *induce a taxonomy once, then classify everything against it by ID*):
-   - **induce** (first run only) — concern facets (label + summary + paths) are
-     embedded and clustered; each cluster is named **contrastively** (the LLM sees
-     samples from neighbouring clusters and must pick a name that distinguishes
-     this one) and gets a **definition** with includes/excludes criteria; one
-     reconcile pass merges near-duplicates at taxonomy level. The result is a
-     fixed, deduplicated feature list — the label space.
-   - **classify** (every run) — each concern is assigned **closed-set, by feature
-     ID**, through a cascade: embedding fast path (clear cosine winner, no LLM) →
-     LLM pick from a top-k shortlist (an ID can't be misspelled, paraphrased or
-     vague; out-of-shortlist answers are rejected and retried) → concerns that fit
-     *no* feature accumulate and are grouped into **new provisional features**
-     (used immediately, flagged for the optional review) → an audit pass
-     re-classifies per-feature embedding outliers. Specificity lives in each
-     feature's *definition*, not in global prompt heuristics.
-5. **attribute** — Map commits ↔ domains (many-to-many, via their concerns), and
-   derive each domain's characteristic files (weighted by *specificity* — a
-   god-class touched by every feature is down-weighted; a file unique to one
-   feature defines it).
-6. **lifecycle** — Mark each domain active / dormant / removed over time.
-7. **index** — Semantic (embeddings) + full-text (FTS5) search over the knowledge
-   base.
-8. **chronicle** *(opt-in, `--chronicle`)* — Narrate each feature's evolution as
-   commit-anchored chapters, plus a repository-wide chronicle.
-9. **graph** — Export a self-contained interactive browser (`graph.html`) and a
-    machine-readable `domains.json`.
+Coined identities — names the owner invented — are discovered from evidence:
+embedded-module registrations (`Py_InitModule("luna", …)`), directories recurring
+across components, `Doc/<name>/` trees, import census, the owner's own DSL
+extensions (an extension whose files are ~100% authored *is* a DSL). Coinage is
+verified against the full vanilla corpus: your identities cannot pre-exist there.
+Anchors claim every authored file that **carries their name** across all
+components — the one merge class exempt from locality guards, because the claim
+rule is the guard.
 
-By default `run` produces the **structural map** (features named & classified,
-their files, authors, and commit timeline). Add `--chronicle` for the **narrative**.
+### 3. Local carving + evidence merges (the residue)
 
-### Incremental runs & the (optional) review seam
+What anchors didn't claim is carved by component-scoped stem families, package and
+directory units, then consolidated by *use*: duplicate territories fold, mutual
+importers merge, fragments join their sole user, and a self-contained subtree the
+project barely touched collapses into one tool. Docs are triaged (design / how-to /
+meta): only corroborated design docs stand as features; a feature must own code.
+Third-party (LICENSE-bearing subtrees), code-named data corpora, and generated
+files are shelved, not deleted.
 
-The taxonomy is **induced once and then frozen**: later runs classify new commits
-against it cheaply and stably. Concerns that fit no existing feature become
-**provisional** features — used immediately (nothing is ever left out of the KB),
-visibly badged in `graph.html`/`domains.json`, and listed as a pending *changeset*
-at the end of each run. The pipeline **never blocks on a human**; provisional
-features that keep attracting concerns across runs auto-confirm, so a fully
-unattended install converges on its own. When you *do* want to curate:
+### 4. Attribution (closed-set, evidence first)
 
-```bash
-gitchronicle taxonomy review          # print the pending changeset
-gitchronicle taxonomy review --edit   # rebase-i style plan in $EDITOR:
-                                      #   accept | reject | lock | merge -> X | rename -> Y
-gitchronicle taxonomy list|show|merge|rename|reject|confirm|export|import
-```
+Every concern (untangled from each commit: label + summary + files) is assigned
+through a cascade, cheapest sufficient signal first:
 
-Rejecting a feature **tombstones** its name (it is never re-proposed) and re-homes
-its concerns. Every applied verb is recorded as a golden-record annotation — an
-accumulating regression set for pipeline changes.
+1. **territory evidence** — files overlap a feature's register territory: assigned,
+   no LLM, never second-guessed;
+2. **embedding fast path** — clear cosine winner vs feature definitions;
+3. **LLM pick-by-ID** from a top-k shortlist (an ID can't be hallucinated;
+   out-of-shortlist answers are rejected);
+4. **batch novelty** — coherent orphan clusters may mint provisional features,
+   but **only from majority-authored files** (removed features like a deleted
+   backoffice re-emerge here; vanilla maintenance routes to the baseline; a Boost
+   drop can never become "Date and Time Handling System");
+5. **audit** — per-feature embedding outliers re-checked.
 
-**In automation** the plan file is the interface — humans and scripts share it:
+Everything is **temporally grounded**: a feature's birth is the first git
+appearance of its territory (rename-aware), and no semantic stage may attribute a
+commit older than the feature's own code. `check` reports violations (must be 0).
 
-```bash
-# 1. unattended (cron): run, detect drift, notify — auto-confirm converges the rest
-gitchronicle run ...
-gitchronicle taxonomy review --json   # {"pending": N, "proposals": [...]}
+### 5. History refines the identity card
 
-# 2. gated CI: exit 2 = changes await review (terraform-style)
-gitchronicle run --frozen || {
-  gitchronicle taxonomy review --edit   # non-tty: writes taxonomy-review.txt
-  # commit taxonomy-review.txt (+ taxonomy export) to a branch, open a PR;
-  # reviewers edit the verbs in ordinary code review
-}
-# on PR merge:
-gitchronicle taxonomy review --apply taxonomy-review.txt
+A feature's name/definition comes from code peeks; its attributed commits carry
+the maintainer's own vocabulary. A post-attribution pass may rewrite name and
+definition — text only, deterministically gated (no change-language, vocabulary
+must recur in ≥2 commits, coined identifiers preserved, old names kept as
+searchable aliases).
 
-# 3. headless curation, no files
-gitchronicle taxonomy merge "Skill Tree System" "Skill Tree"
-gitchronicle taxonomy reject "Misc Fixes"
-```
+### 6. Relations & chronicle
+
+`uses` edges come from static imports over register territory, including
+embedded-interpreter registrations (`import luna` resolves to the C++ bridge that
+registers it) — deterministic, no LLM. High fan-in marks framework hubs.
+`chronicle` (opt-in) narrates each feature's evolution as commit-anchored
+chapters; single-commit chapters skip the LLM entirely.
 
 ---
 
@@ -160,85 +112,86 @@ pip install -r requirements.txt
 pip install -e .            # installs the `gitchronicle` command
 ```
 
-Requirements: Python ≥ 3.11, `git` on PATH, an embedding backend, and a chat LLM.
+Requirements: Python ≥ 3.11, `git` on PATH, an embedding backend, a chat LLM.
 
 ```bash
-ollama pull bge-m3          # embeddings (multilingual, cheap, runs fine on CPU)
+ollama pull bge-m3          # embeddings (multilingual, cheap, fine on CPU)
 # chat model: a cloud API key (recommended) or a local 14–32B on a GPU
 ```
 
 ## Quickstart
 
 ```bash
-cp config.example.toml config.toml     # edit: repo path, rev-range, providers
-cp .env.example .env                   # add your provider API key
-gitchronicle run                       # full pipeline -> build/graph.html
-# add --chronicle for the narrative evolution (extra LLM cost)
+cp config.example.toml config.toml     # edit: repo path, providers
+cp .env.example .env                   # provider API key
+gitchronicle run                       # pipeline -> SQLite KB + HTML
+gitchronicle relations                 # uses/used-by edges (local, free)
+gitchronicle dossier --out dossiers    # kb.html + per-feature md/json + index.md
+# optional:
+gitchronicle chronicle                 # narrated evolution chapters (LLM)
+gitchronicle check                     # health: temporal violations, dups, conflicts
 ```
 
-Or run stages individually (each is resumable):
-
-```bash
-gitchronicle extract      # commits, file churn, branches, tags
-gitchronicle signals      # per-commit signals
-gitchronicle untangle     # LLM: diff -> concerns (label + summary + files)
-gitchronicle catalog      # induce taxonomy (once) + classify concerns by ID
-gitchronicle attribute    # map commits <-> domains, derive files
-gitchronicle index        # semantic + full-text search
-gitchronicle graph        # build/graph.html + build/domains.json
-```
-
-Query the knowledge base:
-
-```bash
-gitchronicle domains                   # list features
-gitchronicle show "Guild War"          # a feature's files, authors, timeline
-gitchronicle ask "how did matchmaking evolve?"
-```
-
-## Choosing a model & provider
-
-The dominant cost is **one LLM call per commit** (`untangle`: read a diff,
-~1,900 input tokens, split into concerns) — an `O(commits)` workload of genuine
-code comprehension. Model class and where you run it are the main constraints.
-
-**Model class** (the `[providers.chat]` model — untangle + naming):
-
-| Class | Verdict |
-|---|---|
-| **≤3B** | ❌ **Unfitting.** Mislabels concerns, parrots the prompt. Smoke tests only. |
-| **7B** | ⚠️ **Usable floor.** Decent but error-prone. |
-| **14–32B** | ✅ **Sweet spot** for untangle quality. |
-| **70B-class** | Best judgment; reserve for the few glossary/merge/`ask` calls (`[providers.chat_large]`). Overkill for bulk untangle. |
-
-**Where to run it** — same prompt, ~6,000-commit history:
-
-| Backend | Full history | Notes |
-|---|---|---|
-| **Cloud API** (OpenAI-compatible) | **~minutes, ~$3** at small-model rates | Recommended default. Bring your own key. |
-| **Consumer GPU** (RTX 4060+) | **~20 min** | Free after hardware; ideal for local + private. |
-| **CPU** (8-core) | **~8–30 h** | Only for small repos or an overnight run. |
-
-It's provider-agnostic — point `[providers.*]` at any OpenAI-compatible endpoint
-(or Ollama for local). Runs are cache-resumable; an interrupted run resumes.
+**Zero-config first run works.** The optional scope file `gitchronicle.md`
+(drafted by `gitchronicle init`) uses include/exclude/**acknowledge** verbs with
+default-include semantics — it is an economy and curation lever, never a
+prerequisite. `acknowledge` catalogues an owned sub-product as ONE entry without
+decomposing it.
 
 ## Outputs
 
-All written under `build/` by default (git-ignored):
+- **`kb.html`** — single-file, offline feature browser: searchable list, feature
+  pages (definition, relations, territory, story, commit table), journey view.
+  Shelved classes (inherited / third-party / content / generated) stay out of the
+  main list but remain browsable.
+- **`dossiers/*.md` + `*.json`** — one self-contained bundle per feature with
+  commit-hash citations; `index.md` orders features as a development journey.
+- **the SQLite db** — source of truth: `domains`, `domain_files` (register vs
+  history territory), `commit_domains`, `domain_edges`, `evolution_chapters`,
+  `concerns`, FTS5 indexes. Query it with any SQLite client.
 
-- **`graph.html`** — self-contained, offline, interactive feature browser
-  (areas → domains → commits/files, every node traceable to commit hashes).
-- **`domains.json`** — machine-readable knowledge base for downstream use.
-- **`gitchronicle.db`** — the full SQLite knowledge base (queryable with SQL).
+## The (optional) review seam
+
+The pipeline never blocks on a human. When you want to curate:
+
+```bash
+gitchronicle taxonomy review --edit   # rebase-i style plan in $EDITOR:
+                                      #   accept | reject | lock | merge -> X | rename -> Y
+gitchronicle taxonomy list|show|merge|rename|reject|confirm|export|import
+gitchronicle run --frozen             # gated mode: exit 2 if changes await review
+```
+
+Rejecting tombstones a name forever; every applied verb becomes a golden-record
+annotation. Merges persist across re-runs.
+
+## Choosing a model & provider
+
+Bulk cost is `O(commits)` untangling plus one classification pass; register peeks
+are `O(worktree units)` and content-cached, so **rebuilds with unchanged inputs
+are nearly free** (all stages are deterministic by construction — same input,
+same cache key).
+
+| Class | Verdict |
+|---|---|
+| ≤3B | ❌ unfitting |
+| 7B | ⚠️ usable floor |
+| **14–32B** | ✅ sweet spot (bulk work) |
+| 70B-class | reserve for the few large-context calls |
+
+Any OpenAI-compatible endpoint works (or Ollama locally). Reference point: a
+~6,500-commit, 35k-file game fork — full pipeline including narrated chronicles —
+ran for roughly **$40–45** of small-model API cost end-to-end, iterations
+included; a single clean pass is a fraction of that.
 
 ## Status
 
-**v0.0.1** — catalog rearchitected from open-set growing-list assignment to
-**induce → freeze → classify-by-ID** (fixed taxonomy with definitions; closed-set
-classification; provisional features + optional review seam; tombstones;
-`--frozen` gated mode). This removes the structural causes of hallucinated /
-near-duplicate feature names and the need for vague-bucket guardrail wordlists.
-Planned next: narrative chronicle polish and full-history runs at scale.
+**v0.2 — "the delta and the anchors."** Register derived from the worktree with
+fork-aware authored/inherited grounding and anchor-first framework assembly;
+evidence-gated attribution with temporal grounding; deterministic relations;
+history-refined naming; md/json/html knowledge-base exports. Validated against a
+12-year, 6.5k-commit production fork with owner review; known limits: anchor
+naming still peek-derived until refine runs, and co-change territory constraints
+(report-only merge/split suggestions) are designed but not yet shipped.
 
 ## License
 
