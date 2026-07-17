@@ -227,25 +227,36 @@ def build_lineage(conn, repo: str, log=print) -> dict:
     god_deg = max(_SEED_MIN + 1, int(len(work) * _GOD_STEM_SHARE))
     seeds = {s: idxs for s, idxs in sorted(stem_cons.items())
              if _SEED_MIN <= len(idxs) <= god_deg and _seed_ok(s, idxs)}
+    # identity containment is judged over FILE populations, never concern sets:
+    # two stems are one family when they mark the same files (luna / luna forge),
+    # not when they ride the same commits — a client feature rides its framework's
+    # commits ('player virtual' concern-containment in forge measured 0.75 and was
+    # wrongly absorbed; its file-containment is 0.08: different files, own family)
+    fpop = {s: {f for f in stem_files[s] if auth[f] == "authored"} for s in seeds}
     order = sorted(seeds, key=lambda s: (-len(seeds[s]), s))
+    pos = {s: k for k, s in enumerate(order)}
     sdsu = _DSU()
-    for small in reversed(order):                       # smallest first
-        cs = seeds[small]
+    for small in sorted(seeds, key=lambda s: (len(fpop[s]), s)):
+        cs = fpop[small]
+        if not cs:
+            continue
         best, share = None, 0.0
-        for big in order:                               # largest first
-            if big == small or len(seeds[big]) < len(cs):
-                break
-            ov = len(cs & seeds[big]) / len(cs)
+        for big in order:
+            if big == small or len(fpop[big]) <= len(cs):
+                continue
+            ov = len(cs & fpop[big]) / len(cs)
             if ov > share:
                 best, share = big, ov
         if best is not None and share >= _SEED_CONTAIN:
-            sdsu.union(order.index(best), order.index(small))
-    fam_of: dict[str, str] = {s: order[sdsu.find(order.index(s))] for s in order}
+            sdsu.union(pos[best], pos[small])
+    fam_of: dict[str, str] = {s: order[sdsu.find(pos[s])] for s in order}
 
-    # one concern, one cluster: dominant family wins. Votes are per-FILE stem hits,
-    # and a stem carried by the file's DIRECTORY outranks one from its basename
-    # (v0.2's claim rule): bind_arena.cpp inside luna/ is luna territory — the
-    # 'arena' basename token must not steal the luna bridge for the arena feature.
+    # one concern, one cluster: dominant family wins. Votes are per-FILE stem hits:
+    # a coined BASENAME BIGRAM is the file's own compound name and outranks all
+    # (player_virtual_manager.cpp IS player-virtual wherever it lives); a stem
+    # carried by the file's DIRECTORY outranks single basename tokens (v0.2's
+    # claim rule: bind_arena.cpp inside luna/ is luna territory, and 'bind arena'
+    # is no coined family — the 'arena' token must not steal the bridge).
     assign: dict[int, str] = {}
     for i, c in enumerate(work):
         votes: Counter = Counter()
@@ -253,9 +264,11 @@ def build_lineage(conn, repo: str, log=print) -> dict:
             if auth[f] != "authored":
                 continue
             dstems = _seg_stems(f)
+            btoks = _tokens(f.rsplit("/", 1)[-1].rsplit(".", 1)[0])
+            bigrams = {f"{a} {b}" for a, b in zip(btoks, btoks[1:])}
             for s in _lineage_stems(f):
                 if s in seeds:
-                    votes[fam_of[s]] += 3 if s in dstems else 1
+                    votes[fam_of[s]] += 4 if s in bigrams else 3 if s in dstems else 1
         if votes:
             assign[i] = min(votes, key=lambda f: (-votes[f], len(seeds[f]), f))
 
