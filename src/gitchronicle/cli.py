@@ -295,6 +295,25 @@ def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
     build_register(conn, provider, cfg["repo"]["path"], cfg, log=_log, force=force)
 
 
+@app.command(name="lineage")
+def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+                emit: str = typer.Option(None, "--emit",
+                                         help="Write the named v0.3 register to this fresh DB")):
+    """v0.3 (experimental): history-native register — cluster untangled concerns on
+    shared file lineage + coined stems. No worktree carving, no config, no LLM until
+    --emit (naming pass). Prints the structural validation verdict."""
+    from .taxonomy.lineage import build_lineage
+    cfg, conn = _setup(config, repo, rev, db)
+    _head("Lineage")
+    res = build_lineage(conn, cfg["repo"]["path"], log=_log)
+    if emit and res["report"]["pass"]:
+        from .taxonomy.lineage import emit_register
+        provider = build_provider(cfg, conn)
+        emit_register(conn, cfg["repo"]["path"], res, emit, provider, log=_log)
+    elif emit:
+        _log("  --emit refused: structural validation did not pass")
+
+
 @app.command()
 def dossier(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
             out: str = typer.Option("dossiers", "--out", help="Output directory")):
