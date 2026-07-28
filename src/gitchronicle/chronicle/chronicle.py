@@ -22,11 +22,13 @@ _GAP_DAYS = 14
 _MAX_COMMITS = 12
 
 CHAP_SYS = (
-    "You are writing the evolution STORY of one code domain. Given a time window of its "
-    "commits (subjects + bodies) and a representative diff, write a short narrative of what "
-    "happened to this domain in that window — one chapter of its history. Be concrete and "
-    "specific, past tense, grounded in the code. Respond with ONE JSON object.")
-CHAP_SCHEMA = 'Return JSON: {"title":"<=6 word period title","narrative":"1-3 sentence story"}'
+    "You are writing the evolution STORY of one code domain. You get a time window of its "
+    "work items (per-commit concerns untangled from the diffs: label + what changed), the "
+    "key files touched, and possibly a representative diff. Write that chapter of the "
+    "domain's history: concrete, specific, past tense, grounded ONLY in the evidence. Name "
+    "the actual mechanisms, subsystems and files that changed. NEVER pad with filler like "
+    "'various improvements', 'several changes', 'enhancements were made' — if the evidence "
+    "is thin, write one short precise sentence instead. Respond with ONE JSON object.")
 
 DISTILL_SYS = (
     "Given a domain's name and its evolution story, write WHAT this domain IS — its role and "
@@ -56,6 +58,34 @@ def _domain_commits(conn, domain_id):
         "ORDER BY c.authored_at ASC", (domain_id,)).fetchall()
     return [{"hash": r["hash"], "subject": r["subject"] or "", "body": (r["body"] or "").strip(),
              "date": r["authored_at"] or "", "t": _epoch(r["authored_at"])} for r in rows]
+
+
+def _domain_concerns(conn, domain_id) -> dict:
+    """commit hash -> this domain's own work items (concern label + summary): the
+    per-domain slice of each commit. Narrating from these instead of raw subjects
+    keeps multi-feature commits from leaking other features' text into the story."""
+    out: dict = defaultdict(list)
+    for r in conn.execute(
+            "SELECT commit_hash, label, summary FROM concerns WHERE domain_id=?",
+            (domain_id,)):
+        lab = (r["label"] or "").strip()
+        summ = (r["summary"] or "").strip()
+        if lab and summ and summ.lower() != lab.lower():
+            out[r["commit_hash"]].append(f"{lab}: {summ[:220]}")
+        elif lab or summ:
+            out[r["commit_hash"]].append((lab or summ)[:220])
+    return out
+
+
+def _chapter_files(conn, domain_id, hashes, cap=8) -> list[str]:
+    """The chapter's territory files, by touch count — concrete anchors for the story."""
+    qmarks = ",".join("?" * len(hashes))
+    rows = conn.execute(
+        f"SELECT cf.path, COUNT(*) n FROM commit_files cf "
+        f"JOIN domain_files df ON df.path = cf.path AND df.domain_id = ? "
+        f"WHERE cf.commit_hash IN ({qmarks}) GROUP BY cf.path ORDER BY n DESC, cf.path "
+        f"LIMIT ?", (domain_id, *hashes, cap)).fetchall()
+    return [r["path"] for r in rows]
 
 
 def _cluster(commits):
@@ -157,32 +187,44 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
         commits = _domain_commits(conn, did)
         if not commits:
             continue
+        concerns = _domain_concerns(conn, did)
         chapters = _cluster(commits)
         conn.execute("DELETE FROM evolution_chapters WHERE target_type='domain' AND target_id=?", (str(did),))
         narratives = []
         for seq, ch in enumerate(chapters):
             if len(ch) == 1:
-                # one commit needs no narration — the commit IS the chapter
+                # one commit needs no narration — its own concern (or message) IS
+                # the chapter, and the concern is already this domain's slice
                 c0 = ch[0]
-                body0 = (c0["body"].splitlines() or [""])[0][:240]
+                body0 = "; ".join(concerns.get(c0["hash"], [])) \
+                    or (c0["body"].splitlines() or [""])[0][:240]
                 conn.execute(
                     "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, "
                     "period_end, title, narrative, commit_hashes, created_at) "
                     "VALUES ('domain', ?,?,?,?,?,?,?,?)",
                     (str(did), seq, c0["date"], c0["date"], c0["subject"][:80],
-                     body0, json.dumps([c0["hash"][:10]]), now_iso()))
+                     body0[:400], json.dumps([c0["hash"][:10]]), now_iso()))
                 narratives.append(body0 or c0["subject"])
                 continue
-            subj = "\n".join(
-                f"- {c['subject']}" + (f"  ~ {c['body'].splitlines()[0][:120]}" if c["body"] else "")
-                for c in ch[:14])
-            # a diff is only worth its tokens when the subjects are thin; richer
-            # chapters narrate from their own commit messages
+            # evidence: this domain's own work items; raw subject only as fallback
+            lines = []
+            for c in ch[:14]:
+                own = concerns.get(c["hash"])
+                if own:
+                    lines += [f"- {w}" for w in own[:2]]
+                else:
+                    lines.append(f"- {c['subject'][:160]}")
+            subj = "\n".join(lines)
+            files = _chapter_files(conn, did, [c["hash"] for c in ch])
             diff = (_diff_of(conn, repo, did, [c["hash"] for c in ch])
-                    if len(ch) <= 2 else "")
+                    if len(ch) <= 4 else "")
+            want = "4-7 sentences" if len(ch) >= 5 else "2-4 sentences"
             user = (f"Domain: {d['name']}\nPeriod: {ch[0]['date'][:10]} .. {ch[-1]['date'][:10]} "
-                    f"({len(ch)} commits)\nCommits:\n{subj}\n\nRepresentative diff:\n{diff or '(none)'}"
-                    f"\n\n{CHAP_SCHEMA}")
+                    f"({len(ch)} commits)\nWork items:\n{subj}\n\nKey files touched:\n"
+                    + "\n".join(f"  {f}" for f in files)
+                    + f"\n\nRepresentative diff:\n{diff or '(none)'}"
+                    + '\n\nReturn JSON: {"title":"<=6 word period title",'
+                    + f'"narrative":"the story, {want}"}}')
             try:
                 r = provider.chat(CHAP_SYS, user, want_json=True,
                                   cache_extra=f"chap:{did}:{ch[0]['hash']}:{ch[-1]['hash']}:{len(ch)}")

@@ -528,6 +528,10 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, "
             "source) VALUES (?,?,?,'lineage')",
             [(h, did, float(n)) for h, n in sorted(cw.items())])
+        # each concern remembers its cluster: downstream stages (chronicle) narrate
+        # from the per-domain slice of a commit, not its whole multi-feature subject
+        out.executemany("UPDATE concerns SET domain_id=? WHERE id=?",
+                        [(did, work[i]["id"]) for i in cl["idxs"]])
 
     # the inherited baseline: maintenance on vanilla files, catalogued per component
     comp_cons: dict[str, list[dict]] = defaultdict(list)
@@ -549,6 +553,8 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, "
             "source) VALUES (?,?,?,'baseline')",
             [(h, did, float(n)) for h, n in sorted(cw.items())])
+        out.executemany("UPDATE concerns SET domain_id=? WHERE id=?",
+                        [(did, c["id"]) for c in cs])
     out.commit()
 
     residue = sum(1 for cl in res["clusters"]
