@@ -70,6 +70,32 @@
 - include: Client/EffectLibrary/**    <!-- 41 files, 445 touches, 2019-01-03→2026-05-27, exts cpp,h,vcxproj,txt (repo-overlap 0.96) -->
 - include: core/include/**    <!-- 29 files, 413 touches, 2024-02-01→2026-06-30, exts hpp,h (repo-overlap 1.0) -->
 
+## Direction
+
+<!-- OPTIONAL. Delete this whole section for auto mode — the pipeline then behaves
+     exactly as if it were never here. Typed statements only; free prose was tried in
+     v0.1 and measured ineffective.
+
+       voice:     how the narration should read
+       audience:  who it is for
+       glossary:  <term> = <what it means here>, for things paths cannot reveal
+       rule:      a standing instruction about grain or naming
+
+     Direction text joins the prompts, so editing it changes the cache key and re-pays
+     the naming and chronicle passes. -->
+
+<!-- A TEMPLATE, inactive. Uncomment the lines you want and re-run. The glossary
+     entries below are guesses from the code, not facts — correct them before use.
+
+- audience: the person who built this, reading it years later
+- voice: Plain and concrete. Name the actual mechanism. No marketing language.
+- glossary: luna = the embedded Lua scripting bridge the server registers handlers against
+- glossary: forge = the quest/event DSL built on top of luna
+- glossary: uchtml = the in-client HTML renderer used by the wiki
+- rule: Item prototypes, item stats, item bonuses and item attributes are ONE system.
+- rule: Skills and the Skill Tree are DISTINCT; never merge them.
+-->
+
 ## Charter
 
 Metin2-derived MMO game: C++ game server, C++/Python client, launcher, world editor

@@ -28,6 +28,18 @@ from .extract.git_ingest import run_git
 
 MD_FILE = "gitchronicle.md"
 
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def _uncommented(section: str) -> str:
+    """Section text with HTML comments removed, including multi-line ones.
+
+    Stripping per line only reaches comments that open and close on that line, so a
+    commented-out BLOCK stayed fully live — a template meant to be inactive was parsed
+    and silently applied. Both readers share this so neither can drift back.
+    """
+    return _COMMENT_RE.sub("", section)
+
 _MARKERS = {"license", "license.txt", "license.md", "license_1_0.txt", "copying",
             "package.json", "cargo.toml", "setup.py", "pom.xml", "gemfile"}
 
@@ -159,8 +171,8 @@ class Scope:
         inc, exc, ack = [], [], []
         if p.exists():
             m = re.search(r"## Scope.*?(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
-            for ln in (m.group(0) if m else "").splitlines():
-                ln = re.sub(r"<!--.*?-->", "", ln).strip()
+            for ln in _uncommented(m.group(0) if m else "").splitlines():
+                ln = ln.strip()
                 mm = re.match(r"-\s*(include|exclude|acknowledge):\s*(\S+)", ln)
                 if mm:
                     {"include": inc, "exclude": exc,
@@ -196,3 +208,102 @@ def scope_or_default(md_path: str | Path = MD_FILE, log=None):
     return lambda path: not is_vendored(path)
 
 
+
+
+class Direction:
+    """DIRECTION — the owner's standing instructions, kept typed rather than as prose.
+
+    The optional half of this tool's original ask: say up front what you are looking for,
+    and let the pipeline lean that way. A ``## Direction`` section in ``gitchronicle.md``;
+    absent, the pipeline runs exactly as it does today (auto mode) — silence must not
+    change behaviour.
+
+    v0.1 shipped a free-prose ``## Charter``, measured it as ineffective and removed it
+    (commit 8d0a8e3). Two things went wrong and both are addressed here. Prose sprayed
+    into every prompt is not a lever you can aim, so the statements are TYPED: a glossary
+    naming things the model cannot know, rules that constrain grain, and a voice for the
+    narration. And nobody could tell whether it had helped, so ``report()`` states exactly
+    what was active and where it was applied.
+
+    Be aware it is not free: direction text joins the prompt, which changes the cache key,
+    so turning it on or editing it re-pays the naming and chronicle passes.
+
+        ## Direction
+        - voice: Write for the person who built this, reading it years later.
+        - glossary: luna = the embedded Lua scripting bridge
+        - rule: Item prototypes, stats and bonuses are ONE system; never split them.
+    """
+
+    VERBS = ("voice", "glossary", "rule", "audience")
+
+    def __init__(self, voice="", audience="", glossary=None, rules=None):
+        self.voice = voice
+        self.audience = audience
+        self.glossary: list[str] = glossary or []
+        self.rules: list[str] = rules or []
+
+    @classmethod
+    def load(cls, md_path: str | Path = MD_FILE) -> "Direction":
+        p = Path(md_path)
+        if not p.exists():
+            return cls()
+        m = re.search(r"## Direction.*?(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
+        if not m:
+            return cls()
+        voice = audience = ""
+        gloss: list[str] = []
+        rules: list[str] = []
+        for ln in _uncommented(m.group(0)).splitlines():
+            ln = ln.strip()
+            mm = re.match(r"-\s*(voice|audience|glossary|rule)\s*:\s*(.+)", ln, re.I)
+            if not mm:
+                continue
+            verb, rest = mm.group(1).lower(), mm.group(2).strip()
+            if verb == "voice":
+                voice = rest
+            elif verb == "audience":
+                audience = rest
+            elif verb == "glossary":
+                gloss.append(rest)
+            else:
+                rules.append(rest)
+        return cls(voice, audience, gloss, rules)
+
+    def exists(self) -> bool:
+        return bool(self.voice or self.audience or self.glossary or self.rules)
+
+    def naming_prefix(self) -> str:
+        """Glossary and grain rules — what a namer cannot infer from paths alone."""
+        if not (self.glossary or self.rules):
+            return ""
+        out = []
+        if self.glossary:
+            out.append("This project's own vocabulary:\n"
+                       + "\n".join(f"- {g}" for g in self.glossary))
+        if self.rules:
+            out.append("The owner's standing rules:\n"
+                       + "\n".join(f"- {r}" for r in self.rules))
+        return "\n".join(out) + "\n"
+
+    def voice_suffix(self) -> str:
+        """Tone for the narration; never changes what the evidence says."""
+        bits = []
+        if self.audience:
+            bits.append(f"Audience: {self.audience}.")
+        if self.voice:
+            bits.append(self.voice)
+        return (" " + " ".join(bits)) if bits else ""
+
+    def key(self) -> str:
+        """Identity of this direction, so a change invalidates the prompts it touched."""
+        import hashlib
+        raw = "\x00".join([self.voice, self.audience, *self.glossary, *self.rules])
+        return hashlib.sha1(raw.encode()).hexdigest()[:10] if raw.strip("\x00") else ""
+
+    def report(self, log=print) -> None:
+        if not self.exists():
+            return
+        log(f"  direction: {len(self.glossary)} glossary, {len(self.rules)} rules"
+            + (", voice set" if self.voice else "")
+            + (f", audience '{self.audience}'" if self.audience else "")
+            + f"  [key {self.key()}]")
