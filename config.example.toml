@@ -55,6 +55,16 @@ temperature = 0.0   # deterministic decoding
 seed = 7            # reproducible sampling
 timeout = 120
 
+# OPTIONAL "naming" role. Feature names come from this model, so switching it RENAMES the
+# whole catalogue and churns entries you may have curated. Pin it to whatever named the
+# catalogue first and change the `chat` role freely for the expensive stages. Unset, it
+# falls back to `chat` and nothing changes.
+# [providers.naming]
+# kind = "openai"
+# base_url = "https://api.scaleway.ai/v1"
+# model = "qwen3-coder-30b-a3b-instruct"
+# api_key = "env:YOUR_API_KEY"
+
 # "Big model" role: dependency judgment, near-duplicate merge, `ask` — few, simple calls.
 [providers.chat_large]
 kind = "openai"

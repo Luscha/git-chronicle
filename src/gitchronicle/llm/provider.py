@@ -176,10 +176,18 @@ def _extract_json(text: str) -> dict:
 class Provider:
     """Holds chat + embed endpoint configs and a DB connection for caching."""
 
-    def __init__(self, chat_cfg: dict, embed_cfg: dict, chat_large_cfg: dict | None = None, conn=None):
+    def __init__(self, chat_cfg: dict, embed_cfg: dict, chat_large_cfg: dict | None = None,
+                 conn=None, roles: dict | None = None):
         self.chat_cfg = chat_cfg
         self.chat_large_cfg = chat_large_cfg or chat_cfg
         self.embed_cfg = embed_cfg
+        # Named roles beyond chat/chat_large. Naming and narration are different jobs:
+        # naming wants the model whose answers the catalogue was built on (its output IS
+        # the entry name, so changing model renames everything and churns the catalogue),
+        # narration wants whichever model writes the best prose. Unset roles fall back to
+        # chat, so a single-provider config behaves exactly as before.
+        self.roles = {"chat": chat_cfg, "chat_large": self.chat_large_cfg,
+                      **(roles or {})}
         self.conn = conn
         self.db_lock = threading.Lock()   # guards the shared sqlite conn (concurrent untangle)
         timeout = max(float(chat_cfg.get("timeout", 900)),
@@ -203,8 +211,9 @@ class Provider:
 
     # -- chat -------------------------------------------------------------
     def chat(self, system: str, user: str, want_json: bool = True,
-             cache_extra: str = "", large: bool = False) -> dict | str:
-        cfg = self.chat_large_cfg if large else self.chat_cfg
+             cache_extra: str = "", large: bool = False,
+             role: str | None = None) -> dict | str:
+        cfg = self.roles.get(role or ("chat_large" if large else "chat")) or self.chat_cfg
         provider, model = cfg.get("kind", "openai"), cfg["model"]
         # Generation params are part of the identity of a response — cache on them too, so
         # changing temperature/seed correctly invalidates stale entries.
@@ -346,7 +355,7 @@ def build_provider(cfg: dict, conn=None) -> Provider:
     """Construct a Provider from the merged config's ``providers`` section."""
     providers = cfg.get("providers", {})
     resolved = {}
-    for name in ("chat", "embed", "chat_large"):
+    for name in ("chat", "embed", "chat_large", "naming"):
         if name not in providers:
             continue
         pc = dict(providers[name])
@@ -362,7 +371,13 @@ def build_provider(cfg: dict, conn=None) -> Provider:
                     "embeddings endpoint. Keep embeddings on ollama."
                 )
             pc["project"] = pc.get("project") or _adc_token().project
-            pc.setdefault("base_url", _vertex_base_url(pc))
+            # config.toml is merged OVER built-in defaults, so a base_url belonging to a
+            # different provider survives when this role is switched to vertex — and then
+            # silently wins. Any endpoint that is not Vertex's is wrong here by definition.
+            if "aiplatform.googleapis.com" not in (pc.get("base_url") or ""):
+                pc["base_url"] = _vertex_base_url(pc)
         pc["api_key"] = _resolve_secret(pc.get("api_key", ""))
         resolved[name] = pc
-    return Provider(resolved["chat"], resolved["embed"], resolved.get("chat_large"), conn=conn)
+    extra = {k: v for k, v in resolved.items() if k not in ("chat", "embed", "chat_large")}
+    return Provider(resolved["chat"], resolved["embed"], resolved.get("chat_large"),
+                    conn=conn, roles=extra)
