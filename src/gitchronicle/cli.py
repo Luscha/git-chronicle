@@ -256,7 +256,9 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
                emit: Optional[str] = typer.Option(None, "--emit",
                    help="The knowledge base to (re)build (default: [output].kb in config)"),
                out: Optional[str] = typer.Option(None, "--out",
-                   help="Dossier/kb.html directory (default: [output].kb_dir in config)")):
+                   help="Dossier/kb.html directory (default: [output].kb_dir in config)"),
+               chronicle_flag: bool = typer.Option(False, "--chronicle",
+                   help="Also narrate each entry's evolution (LLM; cached after the first run)")):
     """Follow the repository: ingest what is new and rebuild the knowledge base.
 
     The command to run on a schedule. Ingest and untangle are already incremental — only
@@ -295,6 +297,12 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     out_conn = connect(emit); init_db(out_conn)
     _head("Relations"); build_relations(out_conn, repo_path, log=_log); out_conn.commit()
     _head("Tiers"); assign_tiers(out_conn, Ledger.load(), log=_log)
+    if chronicle_flag:
+        # Chapters live in the KB, which is rebuilt every run — so the LLM cache must NOT.
+        # `provider` caches against the working DB, which persists, making the second and
+        # every later run free rather than re-narrating 671 chapters from scratch.
+        _head("Chronicle")
+        chronicle(out_conn, provider, repo_path, log=_log)
     out_conn.close()
     _head("Export")
     from .serve.dossier import export_dossiers

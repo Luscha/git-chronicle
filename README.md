@@ -174,16 +174,43 @@ ollama pull bge-m3          # embeddings (multilingual, cheap, fine on CPU)
 cp config.example.toml config.toml     # edit: repo path, providers
 cp .env.example .env                   # provider API key
 gitchronicle update                    # ingest what's new -> KB + kb.html + dossiers
-gitchronicle ledger --draft            # seed a curation ledger from the catalogue
-gitchronicle ledger --edit             # curate: claim/reject/tier/merge, then re-run
-# optional:
-gitchronicle chronicle                 # narrated evolution chapters (LLM)
+gitchronicle update --chronicle        # ... and narrate each entry's evolution (LLM)
+gitchronicle studio                    # browse the catalogue, write rules, see the map
+gitchronicle ledger --draft            # (or seed a ledger from the catalogue, headless)
 gitchronicle check                     # health: temporal violations, dups, conflicts
 ```
 
 `update` is the command to schedule: ingest and untangle skip everything already seen, the
 assembly is deterministic and cheap, and the ledger means a rebuild cannot disturb your
 curation. It ends by reporting what changed — new entries, entries that grew, entries gone.
+
+### The studio
+
+`gitchronicle studio` serves a local page that leads with the diagnostic a terminal
+cannot: **which directories are split across many entries**. Fragmentation alone is the
+wrong signal — the folder holding all the server code is shared by fifty entries and that
+is correct — so it ranks directories that carry a name *no entry answers to*. That is the
+shape of a standalone thing the assembly dissolved into its neighbours: on the reference
+repo it surfaced a 400-file wiki tool smeared across fifteen game features.
+
+Each card shows the filenames and the current holders, because only those distinguish "one
+tool" from "a folder of unrelated features", and offers two answers: make it one entry, or
+record `keep-split` and stop being asked. Naming autocompletes against existing entries and
+warns when a new name would carve files out of one that already exists. **Map** draws the
+catalogue as a layered graph — tiers as layers, edges running down to what a thing is built
+on, ordered by alternating barycentre sweeps (128 crossings → 31 on the reference repo).
+**Story** shows an entry's arcs. Preview replays rules through the same code the real run
+uses and writes nothing until you save.
+
+### Direction (optional)
+
+A `## Direction` section in `gitchronicle.md` states what you are looking for, in typed
+statements rather than prose — `glossary` for meanings paths cannot reveal, `rule` for
+grain, `voice`/`audience` for how the narration should read. Omit the section and the
+pipeline behaves identically (auto mode). Every run reports what was active, which the
+v0.1 free-prose charter never did — it was measured ineffective and removed precisely
+because nobody could tell. Direction text joins the prompts, so enabling or editing it
+changes the cache key and re-pays naming and chronicle.
 
 **Zero-config first run works.** The optional scope file `gitchronicle.md`
 (drafted by `gitchronicle init`) uses include/exclude/**acknowledge** verbs with
@@ -231,6 +258,16 @@ same cache key).
 | **14–32B** | ✅ sweet spot (bulk work) |
 | 70B-class | reserve for the few large-context calls |
 
+**Pin the naming role before changing models.** A feature's name is model output, so
+switching the chat model re-runs naming and renames the catalogue — once, here, that was
+118 entries "gone" and 125 "new". `[providers.naming]` keeps naming on whichever model
+named it first (those answers are cached, so it costs nothing) while `chat` moves freely
+for the expensive stages. Unset, it falls back to `chat`.
+
+Google Vertex is reachable with `kind = "vertex"`, authorised by Application Default
+Credentials rather than an API key; keep `[providers.embed]` on Ollama, since Vertex has no
+OpenAI-compatible embeddings endpoint.
+
 Any OpenAI-compatible endpoint works (or Ollama locally). Reference point: a
 ~6,500-commit, 35k-file game fork — full pipeline including narrated chronicles —
 ran for roughly **$40–45** of small-model API cost end-to-end, iterations
@@ -240,24 +277,37 @@ included; a single clean pass is a fraction of that.
 
 **v0.4 — "the tool proposes, the ledger decides."** Grain is no longer hard-coded: the
 pipeline proposes, and `gitchronicle.plan` overrides it with path rules that survive
-re-runs. Territory is concern evidence in union with worktree name-claiming; entries carry
-a derived tier; relations and chapters come from the improved territory.
+re-runs and history growth. Territory is concern evidence in union with worktree
+name-claiming; entries carry a derived tier; relations, tiers and narrated chapters all
+come off the improved territory.
 
 Measured against v0.3 on the same 12-year, 6.5k-commit fork:
 
 | | v0.3 | v0.4 |
 |---|---|---|
-| median territory | 6 files | **15** |
+| entries | 185 | 194 |
+| median territory | 6 files | **13** |
 | entries with no territory | 15 | **4** |
-| relation edges | **0** | **153** |
-| chronicle chapters | 1,909 | **659** |
-| tiers | — | 5 foundations, 11 frameworks |
+| relation edges | **0** | **160** |
+| chronicle chapters | 1,909 | **779** |
+| tiers | — | 4 foundations, 8 frameworks, 15 tooling |
+| curation | — | ledger rules, replayed every run |
 
-Honest limits: the assembly still re-partitions as history grows (58–68% of feature-grade
-clusters keep their evidence across two years), which is why curation lives in the ledger
-and not in the database — but it does mean un-curated entries drift between runs. The
-golden-sample validation probes are small enough that two of three are reported rather than
-scored. The web studio for editing the ledger in a browser is designed, not built.
+Narrating all 779 chapters cost about **$0.50** on Gemini 2.5 Flash, and a rebuild that
+changes nothing now makes **zero** LLM calls.
+
+Honest limits. The assembly still re-partitions as history grows — 58–68% of
+feature-grade clusters keep their own evidence across two years — which is *why* curation
+lives in the ledger rather than the database, but it does mean un-curated entries drift
+between runs. Two of the three golden validation probes are too small to score and are
+reported rather than gated. Colour in the map is validated for colour-vision deficiency;
+the layout is checked by crossing count, not by eye.
+
+Two lessons are wired into the tool rather than left as advice. Feature names come from a
+model, so the naming role is pinned separately from `chat` — switching the chat model once
+renamed 118 entries and churned the catalogue. And nothing durable is keyed to a generated
+id: the ledger keys on paths, chapters key on the domain's name, because row ids are
+assigned by insertion order and shift whenever the catalogue does.
 
 ## License
 
