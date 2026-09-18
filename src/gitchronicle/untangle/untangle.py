@@ -368,8 +368,15 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                                        max_msg_files, min_subject_len) for r in todo}
     n_diff = sum(1 for r in todo if fileset[r["hash"]] and route[r["hash"]])
     n_msg = sum(1 for r in todo if fileset[r["hash"]] and not route[r["hash"]])
-    log(f"  untangling {len(todo)} commits ({workers} workers): "
-        f"{n_msg} message-routed (cheap), {n_diff} diff-routed (escalated) ...")
+    # A commit whose every file is out of scope yields nothing, which is correct and looks
+    # exactly like a silent failure: "untangling 349 commits ... 0 concerns" reads as 349
+    # lost API calls. Say that they were filtered, and re-selecting them every run is
+    # expected rather than a stuck queue.
+    n_skip = len(todo) - n_msg - n_diff
+    log(f"  untangling {n_msg + n_diff} commits ({workers} workers): "
+        f"{n_msg} message-routed (cheap), {n_diff} diff-routed (escalated) ..."
+        + (f"\n  {n_skip} skipped: every file out of scope (see gitchronicle.md)"
+           if n_skip else ""))
 
     def work(r):
         h, files = r["hash"], fileset[r["hash"]]

@@ -7,6 +7,7 @@ Config from config.toml; --repo/--rev/--db override it.
 
 from __future__ import annotations
 
+import json as _json
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -250,6 +251,95 @@ def run(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db
         raise typer.Exit(2)   # terraform-style: 0 = clean, 2 = changes awaiting review
 
 
+@app.command(name="update")
+def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+               emit: Optional[str] = typer.Option(None, "--emit",
+                   help="The knowledge base to (re)build (default: [output].kb in config)"),
+               out: Optional[str] = typer.Option(None, "--out",
+                   help="Dossier/kb.html directory (default: [output].kb_dir in config)")):
+    """Follow the repository: ingest what is new and rebuild the knowledge base.
+
+    The command to run on a schedule. Ingest and untangle are already incremental — only
+    commits with no concerns yet cost anything — and the assembly is deterministic and
+    cheap, so it simply re-runs. Curation lives in the ledger as rules over paths, so a
+    rebuild cannot disturb it; that is the whole reason the ledger is not keyed to
+    anything the assembly generates.
+    """
+    from .taxonomy.ledger import Ledger
+    from .taxonomy.lineage import build_lineage, emit_register
+    from .taxonomy.relations import build_relations
+    from .taxonomy.tiers import assign_tiers
+    cfg, conn = _setup(config, repo, rev, db)
+    repo_path, rev_range = cfg["repo"]["path"], cfg["repo"]["rev_range"]
+    head = run_git(repo_path, ["rev-parse", "HEAD"]).strip()
+    # paths belong in config, not in every invocation: this is the command meant to be
+    # run on a schedule, and one that needs three flags every time will not be
+    emit = emit or cfg.get("output", {}).get("kb", "gitchronicle-kb.db")
+    out = out or cfg.get("output", {}).get("kb_dir", "kb")
+
+    before = _catalogue_snapshot(emit)
+    known = conn.execute("SELECT COUNT(*) FROM commits").fetchone()[0]
+    console.print(f"[bold]gitchronicle update[/] · {repo_path} @ {head[:10]}")
+
+    _head("Extract"); ingest(conn, repo_path, rev_range, log=_log)
+    _head("Signals"); enrich(conn, log=_log)
+    new = conn.execute("SELECT COUNT(*) FROM commits").fetchone()[0] - known
+    provider = build_provider(cfg, conn)
+    _head("Untangle"); untangle(conn, provider, repo_path, log=_log, **_untangle_kwargs(cfg))
+    _head("Lineage")
+    res = build_lineage(conn, repo_path, log=_log)
+    if not res["report"]["pass"]:
+        console.print("[red]structural validation failed — knowledge base not rebuilt[/]")
+        raise typer.Exit(2)
+    emit_register(conn, repo_path, res, emit, provider, log=_log)
+    out_conn = connect(emit); init_db(out_conn)
+    _head("Relations"); build_relations(out_conn, repo_path, log=_log); out_conn.commit()
+    _head("Tiers"); assign_tiers(out_conn, Ledger.load(), log=_log)
+    out_conn.close()
+    _head("Export")
+    from .serve.dossier import export_dossiers
+    export_dossiers(connect(emit), out, log=_log)
+
+    _head("Since last update")
+    after = _catalogue_snapshot(emit)
+    for line in _catalogue_delta(before, after, new):
+        _log("  " + line)
+
+
+def _catalogue_snapshot(db_path: str) -> dict:
+    """name -> territory size, or empty when there is no knowledge base yet."""
+    if not Path(db_path).exists():
+        return {}
+    c = connect(db_path)
+    try:
+        return {r[0]: r[1] for r in c.execute(
+            "SELECT d.name, COUNT(df.path) FROM domains d "
+            "LEFT JOIN domain_files df ON df.domain_id = d.id GROUP BY d.id")}
+    except Exception:
+        return {}
+    finally:
+        c.close()
+
+
+def _catalogue_delta(before: dict, after: dict, new_commits: int) -> list[str]:
+    """What actually changed — the point of running on a schedule is seeing this."""
+    if not before:
+        return [f"{new_commits} commits ingested; {len(after)} entries (first build)"]
+    added = sorted(set(after) - set(before))
+    gone = sorted(set(before) - set(after))
+    grew = sorted((n for n in set(after) & set(before) if after[n] > before[n]),
+                  key=lambda n: before[n] - after[n])
+    out = [f"{new_commits} new commits; {len(after)} entries "
+           f"({len(added)} new, {len(gone)} gone, {len(grew)} grew)"]
+    for n in added[:10]:
+        out.append(f"  + {n} ({after[n]} files)")
+    for n in gone[:10]:
+        out.append(f"  - {n}")
+    for n in grew[:10]:
+        out.append(f"  ~ {n}: {before[n]} -> {after[n]} files")
+    return out
+
+
 @app.command(name="init")
 def init_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
              yes: bool = typer.Option(False, "--yes",
@@ -306,12 +396,107 @@ def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: s
     cfg, conn = _setup(config, repo, rev, db)
     _head("Lineage")
     res = build_lineage(conn, cfg["repo"]["path"], log=_log)
-    if emit and res["report"]["pass"]:
-        from .taxonomy.lineage import emit_register
-        provider = build_provider(cfg, conn)
-        emit_register(conn, cfg["repo"]["path"], res, emit, provider, log=_log)
-    elif emit:
+    if not emit:
+        return
+    if not res["report"]["pass"]:
         _log("  --emit refused: structural validation did not pass")
+        return
+    from .taxonomy.lineage import emit_register
+    provider = build_provider(cfg, conn)
+    emit_register(conn, cfg["repo"]["path"], res, emit, provider, log=_log)
+
+    # the register alone is a list; relations and tiers are what make it a map, and both
+    # are deterministic and free, so there is no reason to make them a separate step
+    from .taxonomy.ledger import Ledger
+    from .taxonomy.relations import build_relations
+    from .taxonomy.tiers import assign_tiers
+    out = connect(emit)
+    init_db(out)
+    build_relations(out, cfg["repo"]["path"], log=_log)
+    out.commit()
+    assign_tiers(out, Ledger.load(), log=_log)
+    out.close()
+
+
+@app.command(name="studio")
+def studio_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+               port: int = typer.Option(8765, "--port", help="Localhost port")):
+    """Browse the catalogue and edit the ledger in a browser.
+
+    Leads with the diagnostic a terminal cannot show: which directories are split across
+    many entries. A tree with no majority owner is usually one thing the assembly never
+    saw as one. Claim it from the table, preview what moves, save.
+
+    Reads the knowledge base and writes only `gitchronicle.plan` — re-run `update` to
+    rebuild with it.
+    """
+    from .serve.studio import serve_studio
+    cfg, _ = _setup(config, repo, rev, db)
+    _head("Studio")
+    # the KB, not the working DB: the studio reads what `update` emits
+    serve_studio(db or cfg.get("output", {}).get("kb", cfg["db"]["path"]),
+                 log=_log, port=port)
+
+
+@app.command(name="ledger")
+def ledger_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+               edit: bool = typer.Option(False, "--edit", help="Open the ledger in $EDITOR"),
+               draft: bool = typer.Option(False, "--draft",
+                   help="Seed a ledger from the current catalogue (tiers + coined claims)")):
+    """The curation ledger: entries defined by claim/reject rules over paths.
+
+    Nothing here references a generated id, so a curation survives re-runs and history
+    growth — which is what every earlier review mechanism failed to do. Replay is free;
+    edit the file and re-run `lineage --emit` to see it applied.
+    """
+    import subprocess as sp
+    from .taxonomy.ledger import PLAN_FILE, Ledger
+    cfg, conn = _setup(config, repo, rev, db)
+    _head("Ledger")
+    path = Path(PLAN_FILE)
+
+    if draft:
+        if path.exists():
+            _log(f"  {path} exists — edit it rather than overwriting a curation")
+            raise typer.Exit(1)
+        led = Ledger()
+        from .taxonomy.ledger import Entry
+        for r in conn.execute(
+                "SELECT name, tier, stems FROM domains WHERE tier IN ('foundation','framework') "
+                "ORDER BY name"):
+            e = Entry(r["name"])
+            e.tier = r["tier"]
+            for s in _json.loads(r["stems"] or "[]"):
+                # bigram stems ('auto hunt') identify a family but can never match a
+                # path; only single tokens make a usable claim
+                if s and " " not in s:
+                    e.claims.append(f"**/{s}*")
+            led.entries.append(e)
+        led.save(path)
+        _log(f"  drafted {len(led.entries)} entries -> {path}  (review before trusting)")
+        return
+
+    led = Ledger.load(path)
+    if edit:
+        if not path.exists():
+            path.write_text(Ledger().render(), encoding="utf-8")
+        editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+        if not editor or not sys.stdin.isatty():
+            _log(f"  no $EDITOR — edit {path} directly")
+            return
+        sp.call([editor, str(path)])
+        led = Ledger.load(path)
+
+    if not led.exists():
+        _log(f"  no ledger yet. `gitchronicle ledger --draft` seeds one from the catalogue.")
+        return
+    for e in led.entries:
+        _log(f"  {e.name}   tier={e.tier or '-'}  "
+             f"claims={len(e.claims)} rejects={len(e.rejects)}{'  [locked]' if e.locked else ''}")
+    for s, d in led.merges:
+        _log(f"  merge  {s} -> {d}")
+    for t in led.tombstones:
+        _log(f"  reject {t}")
 
 
 @app.command()
