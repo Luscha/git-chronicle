@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 from ..extract.git_ingest import run_git
+from ..scope import Direction
 from ..storage import now_iso
 
 _GAP_DAYS = 14
@@ -24,7 +25,7 @@ _DORMANT_DAYS = 120    # a gap this long is the story pausing, not a weekend
 _UPKEEP_SHARE = 0.75   # a span this routine is one "kept it running" chapter, not many
 _MAX_UPKEEP = 40       # ... but never so long that it stops being readable
 
-CHAP_SYS = (
+_CHAP_SYS_BASE = (
     "You are writing the evolution STORY of one code domain. You get a time window of its "
     "work items (per-commit concerns untangled from the diffs: label + what changed), the "
     "key files touched, and possibly a representative diff. Write that chapter of the "
@@ -32,6 +33,8 @@ CHAP_SYS = (
     "the actual mechanisms, subsystems and files that changed. NEVER pad with filler like "
     "'various improvements', 'several changes', 'enhancements were made' — if the evidence "
     "is thin, write one short precise sentence instead. Respond with ONE JSON object.")
+CHAP_SYS = _CHAP_SYS_BASE
+_DIR_KEY = ""
 
 DISTILL_SYS = (
     "Given a domain's name and its evolution story, write WHAT this domain IS — its role and "
@@ -220,10 +223,96 @@ def _repo_chronicle(conn, provider, log, force):
     conn.commit()
 
 
-def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict:
+
+def _chapter_prompt(conn, repo, did, name, ch, concerns) -> tuple[str, str]:
+    """The chapter's prompt and its cache key.
+
+    Shared by the prefetch and the write pass so the two can never drift: a prefetch that
+    built a different prompt would warm the wrong cache entry and silently buy nothing.
+
+    The key names the DOMAIN, not its row id. Ids are assigned by insertion order, so any
+    change to the catalogue renumbers them and every chapter misses — one rename pass
+    re-paid ~470 narrations that were already in the cache. The name plus the chapter's
+    own commit range identifies the same work across rebuilds, which is the same reason
+    the ledger keys on names.
+    """
+    # evidence: this domain's own work items; raw subject only as fallback
+    lines = []
+    for c in ch[:14]:
+        own = concerns.get(c["hash"])
+        if own:
+            lines += [f"- {w}" for w in own[:2]]
+        else:
+            lines.append(f"- {c['subject'][:160]}")
+    subj = "\n".join(lines)
+    files = _chapter_files(conn, did, [c["hash"] for c in ch])
+    diff = _diff_of(conn, repo, did, [c["hash"] for c in ch]) if len(ch) <= 4 else ""
+    want = "4-7 sentences" if len(ch) >= 5 else "2-4 sentences"
+    user = (f"Domain: {name}\nPeriod: {ch[0]['date'][:10]} .. {ch[-1]['date'][:10]} "
+            f"({len(ch)} commits)\nWork items:\n{subj}\n\nKey files touched:\n"
+            + "\n".join(f"  {f}" for f in files)
+            + f"\n\nRepresentative diff:\n{diff or '(none)'}"
+            + '\n\nReturn JSON: {"title":"<=6 word period title",'
+            + f'"narrative":"the story, {want}"}}')
+    # the direction only enters the key when there IS one: appending an empty suffix still
+    # changes the key, which silently re-paid 482 cached narrations the first time
+    suffix = f":{_DIR_KEY}" if _DIR_KEY else ""
+    return user, f"chap:{name}:{ch[0]['hash']}:{ch[-1]['hash']}:{len(ch)}{suffix}"
+
+
+def _prefetch(conn, provider, repo, doms, workers, log) -> None:
+    """Warm the cache in parallel, then let the sequential pass read it.
+
+    The narration calls are independent, but the WRITES are not: chapter rows carry a seq
+    and the distil step reads the narratives in order. Rather than make the writer
+    concurrent and inherit that ordering problem, this issues the same calls with the same
+    cache keys first — so the real pass runs unchanged, at cache speed. 850 sequential
+    calls is hours; the work itself is a few minutes.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = []
+    for d in doms:
+        did = d["id"]
+        commits = _domain_commits(conn, did)
+        if not commits:
+            continue
+        concerns = _domain_concerns(conn, did)
+        for ch in _cluster(commits):
+            if len(ch) > 1:
+                jobs.append(_chapter_prompt(conn, repo, did, d["name"], ch, concerns))
+    if not jobs:
+        return
+    log(f"    warming {len(jobs)} chapter narrations ({workers} workers) ...")
+    done = [0]
+
+    def run(job):
+        user, key = job
+        try:
+            provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
+        except Exception:      # a failure here is retried by the sequential pass
+            pass
+        done[0] += 1
+        if done[0] % 50 == 0:
+            log(f"      {done[0]}/{len(jobs)}")
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(run, jobs))
+
+
+def chronicle(conn, provider, repo: str, log=print, force: bool = False,
+              workers: int = 8) -> dict:
+    # voice shapes HOW the story reads, never what the evidence says — the grounding
+    # rules in CHAP_SYS stay in front of it and are not overridable from the file
+    direction = Direction.load()
+    direction.report(log)
+    global CHAP_SYS, _DIR_KEY
+    CHAP_SYS = _CHAP_SYS_BASE + direction.voice_suffix()
+    _DIR_KEY = direction.key()
     doms = conn.execute(
         "SELECT id, name FROM domains WHERE status != 'rejected' ORDER BY n_commits DESC").fetchall()
     log(f"  chronicling {len(doms)} domains ...")
+    _prefetch(conn, provider, repo, doms, workers, log)
     done = 0
     for d in doms:
         did = d["id"]
@@ -243,38 +332,25 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
                 # one commit needs no narration — its own concern (or message) IS
                 # the chapter, and the concern is already this domain's slice
                 c0 = ch[0]
-                body0 = "; ".join(concerns.get(c0["hash"], [])) \
-                    or (c0["body"].splitlines() or [""])[0][:240]
+                own = concerns.get(c0["hash"], [])
+                body0 = "; ".join(own) or (c0["body"].splitlines() or [""])[0][:240]
+                # Title from THIS domain's concern label, not the commit subject. A single
+                # commit here usually ships several features at once, so its subject names
+                # other people's work: "chore: core dump fix: pet requirements chore:
+                # updated mob_proto" was the Battle Pass chapter heading. The label is
+                # already the per-domain slice.
+                title = (own[0].split(":", 1)[0] if own else c0["subject"])[:80]
                 conn.execute(
                     "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, "
                     "period_end, title, narrative, commit_hashes, created_at) "
                     "VALUES ('domain', ?,?,?,?,?,?,?,?)",
-                    (str(did), seq, c0["date"], c0["date"], c0["subject"][:80],
+                    (str(did), seq, c0["date"], c0["date"], title,
                      body0[:400], json.dumps([c0["hash"][:10]]), now_iso()))
                 narratives.append(body0 or c0["subject"])
                 continue
-            # evidence: this domain's own work items; raw subject only as fallback
-            lines = []
-            for c in ch[:14]:
-                own = concerns.get(c["hash"])
-                if own:
-                    lines += [f"- {w}" for w in own[:2]]
-                else:
-                    lines.append(f"- {c['subject'][:160]}")
-            subj = "\n".join(lines)
-            files = _chapter_files(conn, did, [c["hash"] for c in ch])
-            diff = (_diff_of(conn, repo, did, [c["hash"] for c in ch])
-                    if len(ch) <= 4 else "")
-            want = "4-7 sentences" if len(ch) >= 5 else "2-4 sentences"
-            user = (f"Domain: {d['name']}\nPeriod: {ch[0]['date'][:10]} .. {ch[-1]['date'][:10]} "
-                    f"({len(ch)} commits)\nWork items:\n{subj}\n\nKey files touched:\n"
-                    + "\n".join(f"  {f}" for f in files)
-                    + f"\n\nRepresentative diff:\n{diff or '(none)'}"
-                    + '\n\nReturn JSON: {"title":"<=6 word period title",'
-                    + f'"narrative":"the story, {want}"}}')
+            user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns)
             try:
-                r = provider.chat(CHAP_SYS, user, want_json=True,
-                                  cache_extra=f"chap:{did}:{ch[0]['hash']}:{ch[-1]['hash']}:{len(ch)}")
+                r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
             except Exception as exc:  # noqa: BLE001
                 log(f"    chapter {did}.{seq} failed ({exc})")
                 r = {}
@@ -295,7 +371,7 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False) -> dict
             continue
         try:
             r = provider.chat(DISTILL_SYS, f"Domain: {d['name']}\nEvolution:\n{story}\n\n"
-                              'Return {"summary":"..."}', want_json=True, cache_extra=f"distill:{did}:{len(narratives)}")
+                              'Return {"summary":"..."}', want_json=True, cache_extra=f"distill:{d['name']}:{len(narratives)}")
             summary = ((r.get("summary") if isinstance(r, dict) else "") or "").strip()
             if summary:
                 conn.execute("UPDATE domains SET summary=? WHERE id=? AND status!='confirmed' AND locked=0",
