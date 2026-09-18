@@ -15,25 +15,48 @@ to be?*
 
 ---
 
-## The architecture (v0.2): identity from the worktree, narrative from history
+## The architecture (v0.4): the tool proposes, the ledger decides
 
-Earlier versions tried to *induce* features from commit clusters. Measured result:
-commits are changes, and a pile of changes is a poor definition of a thing. The
-current architecture inverts this, then lets history correct and enrich it:
+Three earlier versions each hard-coded a **grain** — how big one "feature" is — and each
+one was wrong in its own way, because the grain is the one thing that cannot be settled in
+advance. Architecture-recovery research says the same: clustering is judged against an
+*authoritative decomposition*, and which decomposition is authoritative depends on the
+viewpoint. A framework whose territory spans eleven components is one thing from a feature
+viewpoint and eleven from a package viewpoint, and both readings are defensible.
+
+So v0.4 stops deciding. The pipeline proposes a decomposition from evidence; a text
+**ledger** overrides it with rules; and because those rules name paths rather than
+generated ids, they survive re-runs and years of new history.
 
 ```
-            WORKTREE  (what the code IS)                 HISTORY  (what happened)
- ┌────────────────────────────────────────────┐   ┌─────────────────────────────────┐
- │ delta    inherited vs authored (fork-aware) │   │ untangle  commit -> concerns    │
- │ anchors  coined frameworks claim territory  │   │ classify  concerns -> features  │
- │ carve    stem/pkg/dir units + consolidation │   │           (evidence-gated)      │
- │ shelves  vendored/content/generated/docs    │   │ refine    history names things  │
- └──────────────────┬─────────────────────────┘   │ chronicle narrated chapters     │
-                    │        the REGISTER          └───────────────┬─────────────────┘
-                    └──────────────┬───────────────────────────────┘
-                                   ▼
-                  SQLite KB  ->  kb.html + dossiers/*.md|json + index.md
+            EVIDENCE  (expensive, deterministic, incremental)
+ ┌──────────────────────────────────────────────────────────────┐
+ │ extract/untangle  commits -> concerns        (only new ones)  │
+ │ delta             inherited vs authored (fork-aware)          │
+ │ lineage           coined-stem seeded assembly of concerns     │
+ │ territory         concern-derived ∪ worktree name-claim       │
+ └────────────────────────────┬─────────────────────────────────┘
+                              │
+   ══════════ gitchronicle.plan — the ledger, in git ═══════════
+                              │
+            CURATION  (free, instant, replayed every run)
+ ┌──────────────────────────────────────────────────────────────┐
+ │ entry "Luna Scripting System"                                 │
+ │   claim Server/libluna/**   reject **/protobuf/**             │
+ │   tier framework                                              │
+ └────────────────────────────┬─────────────────────────────────┘
+                              ▼
+      relations (imports) → tiers → SQLite KB → kb.html + dossiers
 ```
+
+**Why the ledger is not keyed to features.** Measured on twelve years of real history:
+assemble the catalogue at a past date, assemble it again at HEAD, and only 58–68% of
+feature-grade clusters still hold their own evidence. Six candidate identity keys — seed
+stem, birth roots, minimum concern id, founding commit, founding triple, oldest root —
+track their cluster at best **89%** of the time, never 95%. The ceiling is structural: a
+cluster's founding member is itself a clustering output, so it moves when the partition
+moves. Rules over paths have no such problem, which is also why the `## Scope` section has
+always survived re-runs while every in-database curation died.
 
 ### 1. The authored delta (fork-aware grounding)
 
@@ -55,7 +78,21 @@ Anchors claim every authored file that **carries their name** across all
 components — the one merge class exempt from locality guards, because the claim
 rule is the guard.
 
-### 3. Local carving + evidence merges (the residue)
+### 3. Territory: two kinds of evidence, then the ledger
+
+An entry owns the files its concerns touched, **in union with** the worktree files carrying
+its own identifiers. Neither alone is enough — concern evidence gave 15 entries no
+territory at all, name-claiming alone gave 63 none — and the union roughly doubles the
+median entry (6 → 15 files). Name-claiming scores a filename match above a directory match,
+the inverse of the anchor rule: a framework owns its tree, but
+`luna/protobuf/ue/battlepass_pb2.py` is the Battle Pass schema and only lives under `luna/`
+because that is where the generator writes.
+
+What no rule can settle is left to you on purpose. `Server/game/src/luna/bind_arena.cpp` is
+Luna's binding *for* Arena; Luna's tree holds 113 core files beside 115 per-feature protobuf
+schemas. The default ships, the contested files are visible, and one ledger line moves them.
+
+### 4. Local carving + evidence merges (the residue)
 
 What anchors didn't claim is carved by component-scoped stem families, package and
 directory units, then consolidated by *use*: duplicate territories fold, mutual
@@ -65,7 +102,7 @@ meta): only corroborated design docs stand as features; a feature must own code.
 Third-party (LICENSE-bearing subtrees), code-named data corpora, and generated
 files are shelved, not deleted.
 
-### 4. Attribution (closed-set, evidence first)
+### 5. Attribution (closed-set, evidence first)
 
 Every concern (untangled from each commit: label + summary + files) is assigned
 through a cascade, cheapest sufficient signal first:
@@ -85,7 +122,7 @@ Everything is **temporally grounded**: a feature's birth is the first git
 appearance of its territory (rename-aware), and no semantic stage may attribute a
 commit older than the feature's own code. `check` reports violations (must be 0).
 
-### 5. History refines the identity card
+### 6. History refines the identity card
 
 A feature's name/definition comes from code peeks; its attributed commits carry
 the maintainer's own vocabulary. A post-attribution pass may rewrite name and
@@ -93,13 +130,25 @@ definition — text only, deterministically gated (no change-language, vocabular
 must recur in ≥2 commits, coined identifiers preserved, old names kept as
 searchable aliases).
 
-### 6. Relations & chronicle
+### 7. Tiers, relations & chronicle
+
+Entries carry a **tier** — foundation, framework, feature, content, tooling — as a flat
+attribute, never a hierarchy: filing them into a tree forces a single parent on exactly the
+cross-cutting things that have none. A foundation is imported by many entries, from several
+components, over years; all three, because fan-in alone promotes a toolchain used often
+inside one component.
+
+### 8. Relations & chronicle
 
 `uses` edges come from static imports over register territory, including
 embedded-interpreter registrations (`import luna` resolves to the C++ bridge that
 registers it) — deterministic, no LLM. High fan-in marks framework hubs.
 `chronicle` (opt-in) narrates each feature's evolution as commit-anchored
-chapters; single-commit chapters skip the LLM entirely.
+chapters. Chapters follow **arcs**, not the calendar: a break means the work genuinely
+stopped for months, and a long run of upkeep is one "kept it running" chapter rather than
+one per month. Building versus maintaining is read from whether the entry gained code, not
+from what the commit message called it. Battle Pass went from 14 chapters to 4; the corpus
+went from 1,909 to 659.
 
 ---
 
@@ -124,13 +173,17 @@ ollama pull bge-m3          # embeddings (multilingual, cheap, fine on CPU)
 ```bash
 cp config.example.toml config.toml     # edit: repo path, providers
 cp .env.example .env                   # provider API key
-gitchronicle run                       # pipeline -> SQLite KB + HTML
-gitchronicle relations                 # uses/used-by edges (local, free)
-gitchronicle dossier --out dossiers    # kb.html + per-feature md/json + index.md
+gitchronicle update                    # ingest what's new -> KB + kb.html + dossiers
+gitchronicle ledger --draft            # seed a curation ledger from the catalogue
+gitchronicle ledger --edit             # curate: claim/reject/tier/merge, then re-run
 # optional:
 gitchronicle chronicle                 # narrated evolution chapters (LLM)
 gitchronicle check                     # health: temporal violations, dups, conflicts
 ```
+
+`update` is the command to schedule: ingest and untangle skip everything already seen, the
+assembly is deterministic and cheap, and the ledger means a rebuild cannot disturb your
+curation. It ends by reporting what changed — new entries, entries that grew, entries gone.
 
 **Zero-config first run works.** The optional scope file `gitchronicle.md`
 (drafted by `gitchronicle init`) uses include/exclude/**acknowledge** verbs with
@@ -185,13 +238,26 @@ included; a single clean pass is a fraction of that.
 
 ## Status
 
-**v0.2 — "the delta and the anchors."** Register derived from the worktree with
-fork-aware authored/inherited grounding and anchor-first framework assembly;
-evidence-gated attribution with temporal grounding; deterministic relations;
-history-refined naming; md/json/html knowledge-base exports. Validated against a
-12-year, 6.5k-commit production fork with owner review; known limits: anchor
-naming still peek-derived until refine runs, and co-change territory constraints
-(report-only merge/split suggestions) are designed but not yet shipped.
+**v0.4 — "the tool proposes, the ledger decides."** Grain is no longer hard-coded: the
+pipeline proposes, and `gitchronicle.plan` overrides it with path rules that survive
+re-runs. Territory is concern evidence in union with worktree name-claiming; entries carry
+a derived tier; relations and chapters come from the improved territory.
+
+Measured against v0.3 on the same 12-year, 6.5k-commit fork:
+
+| | v0.3 | v0.4 |
+|---|---|---|
+| median territory | 6 files | **15** |
+| entries with no territory | 15 | **4** |
+| relation edges | **0** | **153** |
+| chronicle chapters | 1,909 | **659** |
+| tiers | — | 5 foundations, 11 frameworks |
+
+Honest limits: the assembly still re-partitions as history grows (58–68% of feature-grade
+clusters keep their evidence across two years), which is why curation lives in the ledger
+and not in the database — but it does mean un-curated entries drift between runs. The
+golden-sample validation probes are small enough that two of three are reported rather than
+scored. The web studio for editing the ledger in a browser is designed, not built.
 
 ## License
 

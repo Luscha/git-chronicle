@@ -1,0 +1,145 @@
+# gitchronicle — the curation ledger.
+#
+# Written by hand. `gitchronicle ledger --draft` only proposes; a proposal is not a
+# decision, and an unreviewed one is worse than none.
+
+# A standalone tool, not fifteen features. The pipeline smeared its 400 files across
+# Events System, Dragon Lair Quest, Mission System and a dozen more, because its concerns
+# co-occur with whatever game content it was documenting that week.
+entry "Wiki Manager"
+  claim  Client-Files/.devops/wiki_manager/**
+  tier   tooling
+  note   The standalone tool that builds the in-game wiki.
+merge  "Wiki Builder Tabs" -> "Wiki Manager"
+
+entry "CCC"
+  claim  ccc/backend/**
+  tier   tooling
+
+entry "Wiki Builder"
+  claim  Client-Files/.devops/wiki_builder/loader/**
+  tier   tooling
+
+entry "CCC"
+  claim  ccc/frontend/**
+  tier   tooling
+
+entry "GrannyShadersUpdater"
+  claim  Tools/GrannyShadersUpdater/**
+  tier   tooling
+
+entry "GrannyShadersUpdater"
+  claim  Tools/GrannyShadersUpdater/Python27/**
+  tier   tooling
+
+entry "UniversalCore Toolkit"
+  claim  Tools/universalcore_toolkit/ui/models/**
+  tier   tooling
+
+entry "Hack Detection System"
+  claim  Client/SecurityLibrary/**
+  tier   tooling
+
+entry "Luna Scripting System"
+  claim  Server/libluna/**
+  tier   foundation
+
+keep-split Prototypes/**
+
+keep-split Client-Files/uiscript/uiscript/**
+
+keep-split Client/UserInterface/**
+
+keep-split Locale/italy/**
+
+keep-split Locale/data/monster/**
+
+keep-split Client/GameLibrary/**
+
+keep-split Client-Files/root/shaders/**
+
+keep-split Doc/infrastructure/**
+
+keep-split Server/.devops/**
+
+entry "Deployer"
+  claim  Server/deployment/**
+  tier   tooling
+
+keep-split Client-Files/root/shaders/postprocess/**
+
+entry "UniversalCore Toolkit"
+  claim  Tools/universalcore_toolkit/ui/panels/**
+  tier   tooling
+
+keep-split Client/EterLibrary/**
+
+keep-split Locale/protobuf/**
+
+keep-split Locale/data/dungeon/**
+
+keep-split Doc/luna/**
+
+keep-split Server/game/src/luna/**
+
+entry "Test Suite"
+  claim  Tools/test-suite/**
+  tier   tooling
+
+entry "UniversalCore Toolkit"
+  claim  Tools/universalcore_toolkit/**
+  tier   tooling
+
+keep-split Server/db/src/luna/**
+
+entry "Deployer"
+  claim  Tools/m2-deployer/**
+  tier   tooling
+
+entry "Protobuf"
+  claim  Client-Files/root/google/protobuf/**
+  tier   foundation
+
+keep-split Client-Files/root/stubs/**
+
+entry "Updater Interface"
+  claim  Tools/UniversalElements-Updater/UniversalElements-Updater/**
+  tier   tooling
+
+keep-split Client/SpeedTreeLibrary/**
+
+keep-split Client/DebugUI/**
+
+entry "Deploy Configuration"
+  claim  Server/.deployment/**
+  tier   tooling
+
+entry "Deploy Configuration"
+  claim  Server/.deployment/configurations/command/**
+  tier   tooling
+
+entry "Asset Preprocessing"
+  claim  Tools/AssetPreprocessor/**
+  tier   tooling
+
+entry "Asset Preprocessing"
+  claim  Tools/GrannyPreprocessor/preprocessor/**
+  tier   tooling
+
+entry "Test Compiler"
+  claim  Server/quest/test/output/**
+  tier   tooling
+
+entry "Deploy Configuration"
+  claim  Server/.deployment/configurations/root_command/**
+  tier   tooling
+
+keep-split Client-Files/**
+
+keep-split Client-Files/locale/locale/universal/**
+
+keep-split luna/**
+
+entry "Extern"
+  claim  Extern-Server/**
+  tier   tooling
