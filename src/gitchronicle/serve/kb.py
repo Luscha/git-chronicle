@@ -51,6 +51,9 @@ aside { border-right:1px solid var(--line); background:var(--side);
 #list li:hover { background:var(--chip) }
 #list li.on { background:var(--acc); color:#fff }
 #list li.on small { color:#dfe7f5 }
+#list li.tierhead { text-transform:uppercase; letter-spacing:.07em; font-size:11px;
+  color:var(--muted); cursor:default; padding:12px 10px 3px }
+#list li.tierhead:hover { background:none }
 #list small { color:var(--muted); display:block; font-size:11.5px }
 main { overflow-y:auto; padding:26px 40px 80px; min-width:0 }
 main h2 { font-size:22px; margin-bottom:4px }
@@ -90,6 +93,7 @@ table.commits td:nth-child(2) { color:var(--muted); white-space:nowrap }
   <nav>
     <button id="bF" class="on">Features</button>
     <button id="bJ">Journey</button>
+<button id="bM">Map</button>
   </nav>
 </header>
 <div id="app">
@@ -133,12 +137,22 @@ function renderList() {
   const vul = $("vlist"); vul.textContent = "";
   const cur = location.hash.slice(1);
   let nv = 0;
+  // grouped by TIER, foundations first: the question the tool exists to answer is what
+  // everything else was built on, and an alphabetical list buries it.
+  const TIERS = ["foundation", "framework", "feature", "tooling", "content"];
+  const groups = new Map(TIERS.map(t => [t, []]));
   for (const r of DATA) {
     if (q && !(r.name.toLowerCase().includes(q) || r.definition.toLowerCase().includes(q)))
       continue;
     if (r.classification === "vendored" || r.classification === "inherited")
-      { vul.append(itemLi(r, cur)); nv++; }
-    else ul.append(itemLi(r, cur));
+      { vul.append(itemLi(r, cur)); nv++; continue; }
+    (groups.get(r.tier) || groups.get("feature")).push(r);
+  }
+  for (const t of TIERS) {
+    const rows = groups.get(t);
+    if (!rows.length) continue;
+    ul.append(el("li", "tierhead", t + " (" + rows.length + ")"));
+    for (const r of rows) ul.append(itemLi(r, cur));
   }
   $("vsum").textContent = "Third-party & inherited (" + nv + ")";
   $("vbox").style.display = nv ? "" : "none";
@@ -165,6 +179,9 @@ function renderFeature(r) {
   m.append(el("h2", "", (r.used_by.length >= 5 ? "⭐ " : "") + r.name
     + (r.classification === "vendored" ? "  ·  third-party" :
        r.classification === "doc-only" ? "  ·  doc-only" : "")));
+  const meta = el("p", "sum", r.tier + (r.born ? "  ·  " + r.born + " → " + r.last : "")
+    + (r.lifecycle === "removed" ? "  ·  removed" : ""));
+  m.append(meta);
   if (r.definition) m.append(el("div", "def", r.definition));
   if (r.summary && r.summary !== r.definition) m.append(el("div", "sum", r.summary));
   chipRow(m, "Uses", r.uses, "out");
@@ -182,7 +199,9 @@ function renderFeature(r) {
     }
   }
   if (r.territory.length) {
-    m.append(el("h3", "", "Territory (" + r.territory.length + " files)"));
+    const shown = r.territory.length, total = r.territory_total || shown;
+    m.append(el("h3", "", "Territory (" + total + " files"
+      + (total > shown ? ", showing " + shown : "") + ")"));
     const ul = el("ul", "files");
     for (const t of r.territory)
       ul.append(el("li", t.source === "history" ? "hist" : "", t.path));
@@ -225,8 +244,33 @@ function renderJourney() {
   }
 }
 
+function renderMap() {
+  const m = $("main"); m.textContent = "";
+  m.append(el("h2", "", "The map"));
+  m.append(el("p", "sum", "Entries layered by tier; an arrow means the row above is built "
+    + "on the row below. Only entries with edges appear — the rest stand alone."));
+  const TIERS = ["foundation", "framework", "feature", "tooling"];
+  const linked = DATA.filter(r => r.uses.length || r.used_by.length);
+  for (const t of TIERS) {
+    const rows = linked.filter(r => r.tier === t)
+      .sort((a, b) => b.used_by.length - a.used_by.length);
+    if (!rows.length) continue;
+    m.append(el("div", "jyear", t + " (" + rows.length + ")"));
+    const box = el("div", "chips");
+    for (const r of rows) {
+      const b = el("button", "chip");
+      b.append(r.name);
+      if (r.used_by.length) b.append(el("small", "", "  ←" + r.used_by.length));
+      b.onclick = () => { $("bF").click(); location.hash = r.slug; };
+      box.append(b);
+    }
+    m.append(box);
+  }
+}
+
 function route() {
   if (view === "journey") { renderJourney(); renderList(); return; }
+  if (view === "map") { renderMap(); renderList(); return; }
   const r = bySlug.get(location.hash.slice(1)) || DATA.find(x => x.commits.length) || DATA[0];
   if (r) renderFeature(r);
   renderList();
@@ -236,9 +280,11 @@ window.addEventListener("hashchange", () => { view = "features"; setNav(); route
 function setNav() {
   $("bF").className = view === "features" ? "on" : "";
   $("bJ").className = view === "journey" ? "on" : "";
+  $("bM").className = view === "map" ? "on" : "";
 }
 $("bF").onclick = () => { view = "features"; setNav(); route(); };
 $("bJ").onclick = () => { view = "journey"; setNav(); route(); };
+$("bM").onclick = () => { view = "map"; setNav(); route(); };
 const allHashes = new Set();
 for (const r of DATA) for (const c of r.commits) allHashes.add(c.hash);
 $("counts").textContent = DATA.length + " features · "

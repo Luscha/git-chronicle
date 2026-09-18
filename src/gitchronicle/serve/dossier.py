@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 _MIN_COMMITS_FULL = 1     # features with no attributed commits get no dossier (stubs stay in taxonomy export)
@@ -35,7 +35,8 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
             old.unlink()
 
     doms = [dict(r) for r in conn.execute(
-        "SELECT id, name, definition, summary, stems, classification, fan_in "
+        "SELECT id, name, definition, summary, stems, classification, fan_in, "
+        "tier, born_at, last_seen, lifecycle "
         "FROM domains WHERE status IN ('named','confirmed','provisional')")]
     by_id = {d["id"]: d for d in doms}
 
@@ -49,9 +50,11 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
              "subject": r["subject"] or ""})
 
     territory = defaultdict(list)
+    terr_total = Counter()
     for r in conn.execute(
             "SELECT domain_id, path, source FROM domain_files "
             "ORDER BY source = 'register' DESC, weight DESC"):
+        terr_total[r["domain_id"]] += 1
         if len(territory[r["domain_id"]]) < _TERRITORY_CAP:
             territory[r["domain_id"]].append({"path": r["path"], "source": r["source"]})
 
@@ -75,8 +78,12 @@ def export_dossiers(conn, out_dir: str, log=print) -> dict:
             "slug": slug,
             "name": d["name"], "definition": d["definition"] or "",
             "summary": d["summary"] or "", "classification": d["classification"],
+            "tier": d["tier"] or "feature",
+            "born": (d["born_at"] or "")[:10], "last": (d["last_seen"] or "")[:10],
+            "lifecycle": d["lifecycle"] or "active",
             "stems": json.loads(d["stems"] or "[]"),
             "territory": territory.get(d["id"], []),
+            "territory_total": terr_total.get(d["id"], 0),
             "uses": [{"feature": n, "files": w} for n, w in
                      sorted(edges_out.get(d["id"], []), key=lambda x: -x[1])],
             "used_by": [{"feature": n, "files": w} for n, w in
