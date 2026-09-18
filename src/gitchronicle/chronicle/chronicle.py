@@ -20,6 +20,9 @@ from ..storage import now_iso
 
 _GAP_DAYS = 14
 _MAX_COMMITS = 12
+_DORMANT_DAYS = 120    # a gap this long is the story pausing, not a weekend
+_UPKEEP_SHARE = 0.75   # a span this routine is one "kept it running" chapter, not many
+_MAX_UPKEEP = 40       # ... but never so long that it stops being readable
 
 CHAP_SYS = (
     "You are writing the evolution STORY of one code domain. You get a time window of its "
@@ -53,11 +56,19 @@ def _epoch(iso: str | None) -> float:
 
 def _domain_commits(conn, domain_id):
     rows = conn.execute(
-        "SELECT c.hash, c.subject, c.body, c.authored_at FROM commit_domains cd "
+        "SELECT c.hash, c.subject, c.body, c.authored_at, "
+        # growth = a file of this domain that gained lines and lost none. numstat reports
+        # a newly added file exactly so, and change_type is never populated by ingest.
+        "  EXISTS (SELECT 1 FROM commit_files cf JOIN domain_files df "
+        "          ON df.path = cf.path AND df.domain_id = cd.domain_id "
+        "          WHERE cf.commit_hash = c.hash "
+        "            AND cf.deletions = 0 AND cf.insertions > 0) AS added "
+        "FROM commit_domains cd "
         "JOIN commits c ON c.hash=cd.commit_hash WHERE cd.domain_id=? AND c.is_merge=0 "
         "ORDER BY c.authored_at ASC", (domain_id,)).fetchall()
     return [{"hash": r["hash"], "subject": r["subject"] or "", "body": (r["body"] or "").strip(),
-             "date": r["authored_at"] or "", "t": _epoch(r["authored_at"])} for r in rows]
+             "date": r["authored_at"] or "", "t": _epoch(r["authored_at"]),
+             "added": bool(r["added"])} for r in rows]
 
 
 def _domain_concerns(conn, domain_id) -> dict:
@@ -89,16 +100,52 @@ def _chapter_files(conn, domain_id, hashes, cap=8) -> list[str]:
 
 
 def _cluster(commits):
-    """Light temporal chaptering: split on a big time gap or after too many commits."""
-    chapters, cur = [], []
+    """Chapter on ARCS, not on the calendar.
+
+    Cutting purely on a 14-day gap produced a chapter per burst of work, so a feature that
+    ships a content update every month got a chapter every month: Battle Pass came out as
+    fourteen chapters, several of them nothing but a restated commit subject. Its actual
+    story is four arcs -- built in 2021, removed months later, revived in 2024, then a
+    long content-maintenance era.
+
+    An arc ends where the story genuinely turns: a long dormancy (the feature stopped and
+    later came back), or a change of mode between building and maintaining. Runs of
+    routine upkeep collapse into ONE chapter however long they last, because "kept
+    working for two years" is one fact, not twenty-four.
+    """
+    # 1. cut only where the work genuinely stopped. Cutting on every build/upkeep
+    #    alternation was tried and is worse than the calendar it replaced -- the two kinds
+    #    interleave commit by commit, so it split Battle Pass into eighteen.
+    spans, cur = [], []
     for c in commits:
-        if cur and (c["t"] - cur[-1]["t"] > _GAP_DAYS * 86400 or len(cur) >= _MAX_COMMITS):
-            chapters.append(cur)
+        if cur and (c["t"] - cur[-1]["t"]) / 86400 > _DORMANT_DAYS:
+            spans.append(cur)
             cur = []
         cur.append(c)
     if cur:
-        chapters.append(cur)
+        spans.append(cur)
+
+    # 2. a span that is mostly upkeep is ONE chapter however long it ran; a span of real
+    #    building is chaptered at reading length.
+    chapters = []
+    for span in spans:
+        upkeep = sum(_mode(c) == "upkeep" for c in span)
+        step = _MAX_UPKEEP if upkeep >= _UPKEEP_SHARE * len(span) else _MAX_COMMITS
+        chapters += [span[i:i + step] for i in range(0, len(span), step)]
     return chapters
+
+
+def _mode(commit) -> str:
+    """Is this commit building the thing, or keeping it running?
+
+    Structure, not vocabulary: a commit where the domain gained code without losing any is
+    building it; one that only rewrites existing lines is maintaining it. Reading the
+    subject was tried first and is too loose to be useful -- 'fix' appears in most messages
+    in this corpus, so a two-year build era scored 60% upkeep and collapsed into a single
+    unreadable chapter. Whether new code appeared is a fact; what the message called it is
+    a habit.
+    """
+    return "build" if commit.get("added") else "upkeep"
 
 
 def _diff_of(conn, repo, domain_id, hashes, max_lines=50):
