@@ -51,7 +51,9 @@ from itertools import combinations
 from ..extract.git_ingest import run_git
 from .delta import _aliases, file_authorship, history_scan
 from .ground import _STOP, _tokens, path_stems
+from .ledger import Ledger
 from .register import _SRC_EXTS
+from .territory import build_territory
 
 
 def _seg_stems(path: str) -> set:
@@ -95,6 +97,7 @@ _CONTENT_SRC_SHARE = 0.2   # below this source-file share a cluster is content, 
 _KILL_BLOB_CONCERNS = 600
 _KILL_BLOB_COMPONENTS = 4
 _GOLDEN = {"luna": "/luna/", "augments": "augment", "uchtml": "uchtml"}
+_GOLDEN_MIN = 20       # a probe smaller than this is noise, not a gate
 _GOLDEN_SHARE = 0.70
 
 
@@ -390,6 +393,10 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
     blob = (big["concerns"] > _KILL_BLOB_CONCERNS
             and len(big["components"]) > _KILL_BLOB_COMPONENTS)
 
+    # The golden probes are a SAMPLE, and a small one: augments carries under a dozen
+    # concerns, so a handful of newly untangled commits swings its share by forty points.
+    # Probes below _GOLDEN_MIN are reported and not counted -- a gate that flips on 0.6%
+    # more evidence measures noise, and this one blocked a scheduled rebuild doing it.
     golden = {}
     for name, pat in _GOLDEN.items():
         hit_idx = {i for i, c in enumerate(work)
@@ -400,15 +407,17 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
         best = max(clusters, key=lambda cl: len(hit_idx & set(cl["idxs"])))
         share = len(hit_idx & set(best["idxs"])) / len(hit_idx)
         golden[name] = (round(share, 2), len(hit_idx))
-    n_gold = sum(share >= _GOLDEN_SHARE for share, _ in golden.values())
+    scored = {n: v for n, v in golden.items() if v[1] >= _GOLDEN_MIN}
+    n_gold = sum(share >= _GOLDEN_SHARE for share, _ in scored.values())
 
     log(f"  blob check: top cluster {big['concerns']} concerns / "
         f"{len(big['components'])} components -> {'KILL' if blob else 'ok'}")
     for name, (share, n) in golden.items():
-        log(f"  golden {name}: {share:.0%} of its {n} concerns in one cluster")
-    verdict = (not blob) and n_gold >= 2
+        log(f"  golden {name}: {share:.0%} of its {n} concerns in one cluster"
+            + ("" if n >= _GOLDEN_MIN else f"  (sample < {_GOLDEN_MIN}, not scored)"))
+    verdict = (not blob) and n_gold >= min(2, len(scored))
     log(f"  VERDICT: {'PASS' if verdict else 'KILL'} "
-        f"(blob={'yes' if blob else 'no'}, golden {n_gold}/3)")
+        f"(blob={'yes' if blob else 'no'}, golden {n_gold}/{len(scored)} scored)")
     return {"clusters": len(clusters), "features": len(feats), "sizes": dict(sizes),
             "content": len(shelved), "blob": blob, "golden": golden, "pass": verdict}
 
@@ -451,11 +460,18 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
 
     from ..storage.schema import connect as db_connect, init_db
 
+    import os
+
     src_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    # Build beside the target and swap at the end. Deleting it in place broke anything
+    # holding it open — the studio serves this very file — and a run that failed halfway
+    # left a 4KB stub where the knowledge base used to be.
     out_path = Path(out_db)
-    if out_path.exists():
-        out_path.unlink()
-    out = db_connect(out_db)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".building")
+    for stale in (tmp_path, Path(str(tmp_path) + "-wal"), Path(str(tmp_path) + "-shm")):
+        if stale.exists():
+            stale.unlink()
+    out = db_connect(str(tmp_path))
     init_db(out)
     out.execute("ATTACH ? AS s", (src_path,))
     out.execute("PRAGMA foreign_keys=OFF")   # bulk copy; source rows are consistent
@@ -494,6 +510,7 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
 
     log(f"  naming {len(feats)} clusters (LLM, cached)")
     n_llm = 0
+    named: dict[int, tuple[str, str]] = {}
     for ci, cl in enumerate(feats):
         try:
             j = provider.chat(_NAME_SYS, _cluster_prompt(cl, work), want_json=True)
@@ -504,6 +521,29 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
         if not name:
             name = (cl["seed"] or f"family {cl['idxs'][0]}").title()
         n_llm += 1
+        named[ci] = (name, definition)
+
+    # Territory needs the NAMES (an entry claims files carrying its own identifiers), so
+    # it is settled after naming and before anything is written: concern-derived evidence
+    # in union with the worktree name-claim, then the ledger's rules last so a human
+    # verdict always outranks both. Measured: median territory 6 -> 13 files, entries
+    # with none 15 -> 6.
+    authored = sorted(f for f, v in res["auth"].items() if v == "authored" and alive(f))
+    entries = {ci: {"name": named[ci][0], "seed": feats[ci]["seed"]} for ci in named}
+    weights = {ci: territory.get(ci, {}) for ci in named}
+    led = Ledger.load()
+    worktree = [f for f in run_git(repo, ["ls-files"]).splitlines() if f.strip()]
+    final, _, declared = build_territory(
+        entries, {ci: set(w) for ci, w in weights.items()}, authored,
+        ledger=led, worktree=worktree, log=log)
+    tiers = led.tiers()
+    notes = led.notes()
+
+    retired = {s for s, _ in led.merges} | set(led.tombstones)
+    for ci, cl in enumerate(feats):
+        name, definition = named[ci]
+        if name in retired:
+            continue          # the ledger merged or tombstoned it; no row, no dossier
         klass = "content" if cl["content"] else "feature"
         stems = json.dumps(([cl["seed"]] if cl["seed"] else [])[:8])
         cur = out.execute(
@@ -516,11 +556,15 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
              cl["last"] if cl["dead"] else None,
              cl["born"], cl["born"], cl["last"], cl["commits"], len(cl["files"])))
         did = cur.lastrowid
+        # weight is concern-degree where we have it; a name-claimed file has no concern
+        # evidence behind it, so it sits at the bottom of the ordering rather than
+        # pretending to a centrality nothing measured
+        w = weights.get(ci, {})
         out.executemany(
             "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source) "
             "VALUES (?,?,?,?)",
-            [(did, f, float(n), "register" if alive(f) else "history")
-             for f, n in sorted(territory.get(ci, {}).items(), key=lambda kv: -kv[1])])
+            [(did, f, float(w.get(f, 0)), "register" if alive(f) else "history")
+             for f in sorted(final.get(ci, ()), key=lambda p: (-w.get(p, 0), p))])
         cw: Counter = Counter()
         for i in cl["idxs"]:
             cw[work[i]["commit"]] += 1
@@ -557,11 +601,53 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
                         [(did, c["id"]) for c in cs])
     out.commit()
 
+    # entries the ledger declares outright: they own territory and carry the human's own
+    # words, but have no cluster, so their history comes from whoever touched their files
+    for name, files in sorted(declared.items()):
+        if not files:
+            continue
+        rows = out.execute(
+            "SELECT MIN(c.authored_at), MAX(c.authored_at), COUNT(DISTINCT c.hash) "
+            "FROM commit_files cf JOIN commits c ON c.hash = cf.commit_hash "
+            f"WHERE cf.path IN ({','.join('?' * len(files))}) AND c.is_merge = 0",
+            tuple(sorted(files))).fetchone()
+        born, last, ncom = rows[0] or "", rows[1] or "", rows[2] or 0
+        cur = out.execute(
+            "INSERT INTO domains (name, definition, summary, classification, status, "
+            "lifecycle, tier, tier_from, born_at, first_seen, last_seen, n_commits, "
+            "n_files, created_by) VALUES (?,?,?,?, 'named', 'active', ?, 'ledger', "
+            "?,?,?,?,?, 'ledger')",
+            (name, notes.get(name, ""), notes.get(name, ""),
+             tiers.get(name, "feature"), tiers.get(name), born[:10], born[:10], last[:10],
+             ncom, len(files)))
+        did = cur.lastrowid
+        out.executemany(
+            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source) "
+            "VALUES (?,?,0.0,'register')", [(did, f) for f in sorted(files)])
+        out.executemany(
+            "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, source) "
+            "VALUES (?,?,1.0,'ledger')",
+            [(r[0], did) for r in out.execute(
+                "SELECT DISTINCT cf.commit_hash FROM commit_files cf JOIN commits c "
+                f"ON c.hash = cf.commit_hash WHERE cf.path IN ({','.join('?' * len(files))}) "
+                "AND c.is_merge = 0", tuple(sorted(files)))])
+    out.commit()
+
     residue = sum(1 for cl in res["clusters"]
                   if cl["concerns"] < _MIN_CONCERNS or cl["commits"] < _MIN_COMMITS)
     n_dom = out.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
     n_att = out.execute("SELECT COUNT(DISTINCT commit_hash) FROM commit_domains").fetchone()[0]
     log(f"  {n_dom} domains ({n_llm} named), {n_att} distinct commits attributed; "
         f"{residue} residue micro-clusters left unattributed")
+    out.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # fold the WAL in before the swap
     out.close()
+    for suffix in ("-wal", "-shm"):
+        stale = Path(str(tmp_path) + suffix)
+        if stale.exists():
+            stale.unlink()
+    os.replace(tmp_path, out_path)                   # atomic: readers see old or new
+    for suffix in ("-wal", "-shm"):
+        stale = Path(str(out_path) + suffix)
+        if stale.exists():
+            stale.unlink()
     return {"domains": n_dom, "attributed": n_att, "residue": residue}

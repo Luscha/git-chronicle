@@ -148,6 +148,10 @@ CREATE TABLE IF NOT EXISTS domains (
     definition       TEXT,          -- taxonomy definition: one sentence + includes/excludes criteria
     stems            TEXT,          -- JSON array: path stems that evidence this feature (v3 ground)
     named_from       INTEGER,       -- how many concerns the name was drafted from (rename-on-accretion)
+    tier             TEXT,          -- foundation|framework|feature|content|tooling (a flat
+                                    -- attribute, NOT a hierarchy: a cross-cutting framework
+                                    -- like luna has no single parent to be filed under)
+    tier_from        TEXT,          -- 'ledger' = a human decided; auto-runs never overwrite
     classification   TEXT,          -- core|feature|subsystem|data|ui|infra|tooling|docs
     fan_in           INTEGER DEFAULT 0,  -- how many other domains depend on this one
     tags             TEXT,          -- JSON array
@@ -330,6 +334,10 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE domains ADD COLUMN stems TEXT")
     if "named_from" not in cols:
         conn.execute("ALTER TABLE domains ADD COLUMN named_from INTEGER")
+    if "tier" not in cols:   # foundation|framework|feature|content|tooling
+        conn.execute("ALTER TABLE domains ADD COLUMN tier TEXT")
+    if "tier_from" not in cols:   # 'ledger' when a human set it; auto-runs must not clobber
+        conn.execute("ALTER TABLE domains ADD COLUMN tier_from TEXT")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(concerns)")}
     for name, decl in (("summary", "TEXT"), ("assign_source", "TEXT"), ("assign_conf", "REAL"),
                        ("origin", "TEXT")):
