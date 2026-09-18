@@ -31,6 +31,18 @@ html = "build/graph.html"    # interactive knowledge-base browser (self-containe
 json = "build/domains.json"  # machine-readable export to build your own site on top of
 
 # --- providers (any OpenAI-compatible endpoint; secrets read from .env via env: prefix) ---
+# GOOGLE VERTEX: set kind = "vertex" on a chat role to spend Vertex credits. There is no
+# api_key — it authorises with Application Default Credentials (`gcloud auth application-
+# default login`), and base_url is derived from project/location unless you set it:
+#     [providers.chat]
+#     kind = "vertex"
+#     project = "my-gcp-project"     # optional: defaults to the project ADC carries
+#     location = "us-central1"       # or "global"
+#     model = "google/gemini-2.5-flash"
+# Embeddings must NOT use kind="vertex" (no OpenAI-compatible embeddings endpoint there) —
+# leave [providers.embed] on Ollama. Needs the extra: pip install 'gitchronicle[vertex]'.
+# NOTE: llm_cache keys include provider+model, so changing the chat provider re-pays the
+# whole untangle. Switch deliberately.
 # The chat model does per-commit untangle + naming: the dominant cost (O(commits)). Model choice
 # matters — a <=3B model is too weak; 7B is the usable floor; 14-32B is the sweet spot. Use a cloud
 # API (below) or a local 14B+ on a GPU. See the README "Choosing a model & provider".

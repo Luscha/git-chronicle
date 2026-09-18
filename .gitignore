@@ -21,3 +21,6 @@ config.toml
 graph.html
 domains.json
 features.json
+
+.serena
+.claude

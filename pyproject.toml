@@ -25,6 +25,11 @@ dependencies = [
     "typer>=0.26.8",
 ]
 
+[project.optional-dependencies]
+# Google Vertex AI as a chat provider: authorises with Application Default Credentials
+# instead of an API key. Only needed for providers.*.kind = "vertex".
+vertex = ["google-auth>=2.40"]
+
 [project.scripts]
 gitchronicle = "gitchronicle:main"
 

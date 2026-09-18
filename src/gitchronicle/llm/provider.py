@@ -1,11 +1,19 @@
 """A thin, provider-agnostic LLM layer.
 
 Two capabilities — ``chat`` and ``embed`` — over any OpenAI-compatible endpoint
-(Ollama, OpenAI, Scaleway, ...). Chat responses are cached in ``llm_cache`` so
+(Ollama, OpenAI, Scaleway, Vertex, ...). Chat responses are cached in ``llm_cache`` so
 re-labelling never re-pays. Swapping providers is a config change, not a code change.
 
+``kind="vertex"`` reaches Vertex AI through its OpenAI-compatible surface, so it reuses
+the OpenAI request path entirely and differs only in how it authorises: no API key, an
+OAuth token minted from Application Default Credentials. Vertex exposes no
+OpenAI-compatible *embeddings* endpoint — keep embeddings on Ollama (or another
+OpenAI-compatible provider) when chat runs on Vertex.
+
 Anthropic (chat-only, no embeddings endpoint) would be a separate adapter; it is
-intentionally not wired for the local-first slice.
+intentionally not wired for the local-first slice. Claude models served *by* Vertex are
+not reachable here either: they speak the native Anthropic Messages shape on
+``:rawPredict``, not the OpenAI one.
 """
 
 from __future__ import annotations
@@ -52,6 +60,106 @@ class LLMError(RuntimeError):
     pass
 
 
+_VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+class _AuthResponse:
+    """google-auth's transport response shape (status/headers/data)."""
+
+    def __init__(self, resp: httpx.Response):
+        self.status = resp.status_code
+        self.headers = resp.headers
+        self.data = resp.content
+
+
+class _HttpxAuthRequest:
+    """google-auth's transport interface over httpx.
+
+    google-auth ships transports for `requests`, `urllib3` and gRPC; this project speaks
+    httpx everywhere, so the token refresh borrows that client rather than making the
+    vertex extra drag in a second HTTP stack.
+    """
+
+    def __init__(self):
+        self._client = httpx.Client(timeout=60)
+
+    def __call__(self, url, method="GET", body=None, headers=None, timeout=None, **kwargs):
+        return _AuthResponse(self._client.request(
+            method, url, content=body, headers=headers, timeout=timeout or 60))
+
+
+class _ADCToken:
+    """OAuth bearer minted from Application Default Credentials.
+
+    Vertex refuses API keys. Its tokens live about an hour — less than a full untangle
+    over a large history — so the token is refreshed in place instead of being resolved
+    once at startup, and the refresh is locked because untangle runs several workers
+    against this one credential.
+    """
+
+    _SKEW = 300.0        # refresh this early: a call must not start on a dying token
+
+    def __init__(self):
+        try:
+            import google.auth
+        except ImportError as exc:
+            raise LLMError("kind='vertex' needs google-auth: pip install 'gitchronicle[vertex]'"
+                           ) from exc
+        self._request = _HttpxAuthRequest()
+        self._creds, self.project = google.auth.default(scopes=[_VERTEX_SCOPE])
+        self._lock = threading.Lock()
+
+    def token(self) -> str:
+        with self._lock:
+            if not self._creds.token or self._stale():
+                self._creds.refresh(self._request)
+            return self._creds.token
+
+    def _stale(self) -> bool:
+        exp = getattr(self._creds, "expiry", None)
+        if exp is None:
+            return False
+        from datetime import datetime, timezone
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return (exp - datetime.now(timezone.utc)).total_seconds() < self._SKEW
+
+
+_adc: _ADCToken | None = None
+_adc_lock = threading.Lock()
+
+
+def _adc_token() -> _ADCToken:
+    """The process-wide ADC credential (built on first use, so non-Vertex runs never
+    touch google-auth and never need it installed)."""
+    global _adc
+    with _adc_lock:
+        if _adc is None:
+            _adc = _ADCToken()
+    return _adc
+
+
+def _auth_header(cfg: dict) -> dict:
+    if cfg.get("kind") == "vertex":
+        h = {"Authorization": f"Bearer {_adc_token().token()}"}
+        if cfg.get("project"):
+            # user ADC (`gcloud auth application-default login`) carries no billing
+            # project of its own; Vertex bills and quotas against this one.
+            h["x-goog-user-project"] = str(cfg["project"])
+        return h
+    return {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+
+
+def _vertex_base_url(cfg: dict) -> str:
+    """The OpenAI-compatible surface; the caller's client appends /chat/completions."""
+    loc = cfg.get("location") or "us-central1"
+    project = cfg.get("project") or _adc_token().project
+    if not project:
+        raise LLMError("vertex: set providers.<role>.project (ADC carries no default project)")
+    host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
+    return f"https://{host}/v1/projects/{project}/locations/{loc}/endpoints/openapi"
+
+
 def _extract_json(text: str) -> dict:
     """Tolerant JSON parse: handles code fences / prose around the object."""
     text = text.strip()
@@ -82,7 +190,7 @@ class Provider:
     def embed(self, texts: list[str]) -> np.ndarray:
         cfg = self.embed_cfg
         url = cfg["base_url"].rstrip("/") + "/embeddings"
-        headers = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+        headers = _auth_header(cfg)
         batch = int(cfg.get("batch", 16))
         out: list[list[float]] = []
         for i in range(0, len(texts), batch):
@@ -115,7 +223,7 @@ class Provider:
 
     def _chat_openai(self, cfg: dict, system: str, user: str, want_json: bool):
         url = cfg["base_url"].rstrip("/") + "/chat/completions"
-        headers = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+        headers = _auth_header(cfg)
         payload = {
             "model": cfg["model"],
             "messages": [{"role": "system", "content": system},
@@ -124,7 +232,9 @@ class Provider:
         }
         if cfg.get("seed") is not None:   # reproducible sampling (generic; honoured where supported)
             payload["seed"] = int(cfg["seed"])
-        if want_json:
+        # json_mode=false is the escape hatch for endpoints that reject response_format;
+        # _extract_json already tolerates a model that answers with prose around the object.
+        if want_json and cfg.get("json_mode", True):
             payload["response_format"] = {"type": "json_object"}
         data = self._post(url, payload, headers)
         return data["choices"][0]["message"]["content"], data.get("usage")
@@ -243,8 +353,16 @@ def build_provider(cfg: dict, conn=None) -> Provider:
         if pc.get("kind") == "anthropic":
             raise LLMError(
                 f"providers.{name}.kind='anthropic' is not supported; "
-                "use an OpenAI-compatible endpoint (ollama/openai/together/scaleway)."
+                "use an OpenAI-compatible endpoint (ollama/openai/together/scaleway/vertex)."
             )
+        if pc.get("kind") == "vertex":
+            if name == "embed":
+                raise LLMError(
+                    "providers.embed.kind='vertex': Vertex exposes no OpenAI-compatible "
+                    "embeddings endpoint. Keep embeddings on ollama."
+                )
+            pc["project"] = pc.get("project") or _adc_token().project
+            pc.setdefault("base_url", _vertex_base_url(pc))
         pc["api_key"] = _resolve_secret(pc.get("api_key", ""))
         resolved[name] = pc
     return Provider(resolved["chat"], resolved["embed"], resolved.get("chat_large"), conn=conn)
