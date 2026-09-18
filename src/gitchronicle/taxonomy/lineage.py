@@ -51,6 +51,7 @@ from itertools import combinations
 from ..extract.git_ingest import run_git
 from .delta import _aliases, file_authorship, history_scan
 from .ground import _STOP, _tokens, path_stems
+from ..scope import Direction
 from .ledger import Ledger
 from .register import _SRC_EXTS
 from .territory import build_territory
@@ -508,12 +509,17 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             continue                        # contested file: nobody's territory
         territory[top[0][0]][f] = top[0][1]
 
+    direction = Direction.load()
+    direction.report(log)
+    name_sys = _NAME_SYS + ("\n\n" + direction.naming_prefix()
+                            if direction.naming_prefix() else "")
     log(f"  naming {len(feats)} clusters (LLM, cached)")
     n_llm = 0
     named: dict[int, tuple[str, str]] = {}
     for ci, cl in enumerate(feats):
         try:
-            j = provider.chat(_NAME_SYS, _cluster_prompt(cl, work), want_json=True)
+            j = provider.chat(name_sys, _cluster_prompt(cl, work), want_json=True,
+                              cache_extra=direction.key(), role="naming")
             name = str(j.get("name") or "").strip()[:80]
             definition = str(j.get("definition") or "").strip()[:400]
         except Exception as e:              # a failed name never blocks the register

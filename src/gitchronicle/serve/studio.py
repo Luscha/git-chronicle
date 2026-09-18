@@ -221,6 +221,36 @@ def _lint(led: Ledger, catalogue: dict, plan_text: str = "") -> list[str]:
     return warn[:12]
 
 
+
+def _edges(conn) -> list[dict]:
+    """uses-edges by NAME, so the graph survives a rebuild that renumbers domains."""
+    return [{"src": r["s"], "dst": r["d"], "w": r["weight"] or 0}
+            for r in conn.execute(
+                "SELECT s.name s, d.name d, e.weight FROM domain_edges e "
+                "JOIN domains s ON s.id = e.src_domain "
+                "JOIN domains d ON d.id = e.dst_domain")]
+
+
+def _story(conn, name: str) -> dict:
+    """One entry's narrated evolution, newest arc last."""
+    row = conn.execute("SELECT id, name, summary, definition, tier, born_at, last_seen, "
+                       "n_commits FROM domains WHERE name = ?", (name,)).fetchone()
+    if not row:
+        return {"error": f"no entry named {name!r}"}
+    chapters = [{
+        "title": c["title"] or "", "narrative": c["narrative"] or "",
+        "start": (c["period_start"] or "")[:10], "end": (c["period_end"] or "")[:10],
+        "commits": json.loads(c["commit_hashes"] or "[]"),
+    } for c in conn.execute(
+        "SELECT title, narrative, period_start, period_end, commit_hashes "
+        "FROM evolution_chapters WHERE target_type='domain' AND target_id=? "
+        "ORDER BY period_start", (row["id"],))]
+    return {"name": row["name"], "tier": row["tier"], "summary": row["summary"] or "",
+            "definition": row["definition"] or "", "born": (row["born_at"] or "")[:10],
+            "last": (row["last_seen"] or "")[:10], "commits": row["n_commits"] or 0,
+            "chapters": chapters}
+
+
 def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None = None) -> dict:
     p = Path(plan_path)
     if plan_text is None:
@@ -231,6 +261,9 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
         led = Ledger()
     return {
         "catalogue": _catalogue(conn),
+        "edges": _edges(conn),
+        "chapters": conn.execute(
+            "SELECT COUNT(*) FROM evolution_chapters").fetchone()[0],
         "trees": _fragmentation(conn, led),
         "plan": plan_text,
         "plan_path": str(p),
@@ -270,7 +303,15 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
 
         def do_GET(self):
             if self.path == "/":
-                self._send(PAGE.encode(), "text/html; charset=utf-8")
+                self._send(page(), "text/html; charset=utf-8")
+            elif self.path.startswith("/api/story"):
+                from urllib.parse import parse_qs, urlparse
+                q = parse_qs(urlparse(self.path).query)
+                c = fresh()
+                try:
+                    self._json(_story(c, (q.get("entry") or [""])[0]))
+                finally:
+                    c.close()
             elif self.path == "/api/state":
                 c = fresh()
                 try:
@@ -325,455 +366,15 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
         srv.server_close()
 
 
-PAGE = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gitchronicle studio</title>
-<style>
-:root { --bg:#fff; --fg:#1a1d21; --muted:#69707a; --line:#e3e6ea; --side:#f6f7f9;
-        --acc:#2860c4; --chip:#eef2f9; --warn:#b4530a; --ok:#1e7a45; --card:#fff; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg:#14161a; --fg:#e6e8eb; --muted:#96a0ab; --line:#2a2f36; --side:#191c21;
-          --acc:#7aa5f0; --chip:#20293a; --warn:#e2933f; --ok:#5fc98c; --card:#181b20; }
-}
-* { box-sizing:border-box; margin:0 }
-body { background:var(--bg); color:var(--fg); font:14px/1.55 system-ui,-apple-system,sans-serif }
-header { display:flex; align-items:center; gap:14px; padding:10px 20px; border-bottom:1px solid var(--line) }
-header h1 { font-size:15px }
-nav { margin-left:auto; display:flex; gap:6px }
-nav button { background:none; border:1px solid var(--line); color:var(--fg); border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-nav button.on { background:var(--acc); border-color:var(--acc); color:#fff }
-#how { background:var(--side); border-bottom:1px solid var(--line); padding:9px 20px;
-  font-size:13px; color:var(--muted) }
-#how b { color:var(--fg); font-weight:600 }
-main { padding:18px 20px 90px; max-width:980px }
-h2 { font-size:17px; margin-bottom:4px }
-.sub { color:var(--muted); font-size:13px; max-width:80ch }
-.card { border:1px solid var(--line); background:var(--card); border-radius:10px;
-  padding:14px 16px; margin:12px 0 }
-.card.done { opacity:.45 }
-.card h3 { font-size:14px; font-family:ui-monospace,Menlo,monospace; margin-bottom:3px }
-.facts { color:var(--muted); font-size:12.5px; margin-bottom:9px }
-.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted) }
-.cols { display:flex; gap:26px; flex-wrap:wrap; margin:8px 0 12px }
-.cols > div { min-width:220px } .cols h4 { font-size:11.5px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--muted); margin-bottom:4px; font-weight:500 }
-.acts { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-button.p { background:var(--acc); border:1px solid var(--acc); color:#fff; border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-button.s { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-button.s:hover { color:var(--fg); border-color:var(--acc) }
-input,select { background:var(--bg); color:var(--fg); border:1px solid var(--line);
-  border-radius:6px; padding:5px 9px; font-size:13px; font-family:inherit }
-input { min-width:240px }
-table { border-collapse:collapse; width:100%; font-size:13px }
-th,td { text-align:left; padding:5px 9px; border-bottom:1px solid var(--line); vertical-align:top }
-th { color:var(--muted); font-weight:500; font-size:12px }
-td.num,th.num { text-align:right; font-variant-numeric:tabular-nums }
-.tier { display:inline-block; font-size:11px; padding:1px 8px; border-radius:99px;
-  background:var(--chip); color:var(--muted) }
-textarea { width:100%; height:40vh; background:var(--side); color:var(--fg); border:1px solid var(--line);
-  border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12.5px }
-#bar { position:fixed; left:0; right:0; bottom:0; background:var(--card);
-  border-top:1px solid var(--line); padding:10px 20px; display:flex; gap:12px; align-items:center }
-#bar .grow { flex:1; color:var(--muted); font-size:13px }
-.err { color:var(--warn) } .ok { color:var(--ok) }
-details summary { cursor:pointer; color:var(--muted); font-size:12.5px }
-</style></head><body>
-<header><h1>gitchronicle studio</h1>
-<nav><button id="bR" class="on">Review</button><button id="bC">Catalogue</button>
-<button id="bL">Rules</button></nav></header>
-<div id="how"></div>
-<datalist id="entrynames"></datalist>
-<main id="main">loading…</main>
-<div id="bar"><span class="grow" id="status"></span>
-  <button class="s" id="bPrev">Preview changes</button>
-  <button class="p" id="bSave">Save rules</button></div>
-<script>
-"use strict";
-let S = null, view = "review", planText = "", dirty = 0, skipped = new Set();
-const $ = id => document.getElementById(id);
-const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c;
-  if (x !== undefined) e.textContent = x; return e; };
+_PAGE_FILE = Path(__file__).with_name("studio.html")
 
-const HOW = {
-  review: "<b>Step 1 of 3 — Review.</b> Each card is one directory the catalogue split "
-    + "across several entries. Look at the filenames: if they are all parts of <b>one "
-    + "thing you built</b>, make it one entry. If they are genuinely different features "
-    + "that happen to share a folder, skip it — being split is correct there.",
-  catalogue: "<b>Everything the tool found.</b> Grouped by tier. <b>set by</b> tells you "
-    + "whether you decided a tier or the tool guessed. Change any guess you disagree with.",
-  rules: "<b>Step 2 and 3 — Preview, then Save.</b> These rules are replayed on every run, "
-    + "so they survive new commits. Preview shows exactly which files move before anything "
-    + "is written. After saving, run <b>gitchronicle update</b> to rebuild."
-};
 
-async function load() {
-  S = await (await fetch("/api/state")).json();
-  planText = S.plan;
-  const dl = $("entrynames"); dl.textContent = "";
-  for (const r of S.catalogue.slice().sort((a, b) => a.name.localeCompare(b.name)))
-    dl.append(new Option(r.name));
-  render();
-}
+def page() -> bytes:
+    """The page, read from disk on every request.
 
-function setStatus(msg, cls) {
-  const s = $("status");
-  s.className = "grow " + (cls || "");
-  s.textContent = msg || (dirty
-    ? dirty + " unsaved rule" + (dirty > 1 ? "s" : "") + " — preview, then save"
-    : "No unsaved changes. Editing " + S.plan_path);
-}
-
-function pendingNames() {
-  const out = [];
-  const re = /^entry\s+"([^"]*)"/gm;
-  let m; while ((m = re.exec(planText))) out.push(m[1]);
-  return out;
-}
-
-async function addRule(text) {
-  planText = planText.replace(/\s*$/, "") + "\n\n" + text.trim() + "\n";
-  dirty++; setStatus();
-  await refreshTrees();       // a question just answered must leave the queue at once
-}
-
-async function refreshTrees() {
-  const r = await (await fetch("/api/preview", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (r && r.trees) S.trees = r.trees;
-  return r;
-}
-
-// ---------- Review ----------------------------------------------------------------
-function renderReview() {
-  const m = $("main"); m.textContent = "";
-  const open = S.trees.filter(t => !skipped.has(t.dir) && !t.handled);
-  const done = S.trees.filter(t => t.handled);
-  m.append(el("h2", "", "Directories the catalogue split up"));
-  m.append(el("div", "sub", open.length + " still open, most suspicious first. "
-    + "A directory is suspicious when no single entry owns most of it and nothing in the "
-    + "catalogue is named after it."));
-  for (const t of open.slice(0, 40)) m.append(card(t));
-  if (!open.length) m.append(el("p", "sub", "Nothing left to review."));
-
-  if (done.length) {
-    const d = el("details");
-    d.style.marginTop = "18px";
-    d.append(el("summary", "", done.length + " already covered by a rule"));
-    for (const t of done) {
-      const r = el("div", "sub");
-      r.append(el("span", "mono", t.dir), " → ", el("b", "", t.handled));
-      d.append(r);
-    }
-    m.append(d);
-  }
-}
-
-function card(t) {
-  const c = el("div", "card");
-  c.append(el("h3", "", t.dir));
-  c.append(el("div", "facts", t.files + " files · split across " + t.entries
-    + " entries · largest holder “" + t.top + "” has only "
-    + Math.round(t.top_share * 100) + "%"));
-
-  const cols = el("div", "cols");
-  const a = el("div"); a.append(el("h4", "", "what is in it"));
-  for (const s of t.samples) a.append(el("div", "mono", s));
-  const b = el("div"); b.append(el("h4", "", "currently filed under"));
-  for (const [n, k] of t.holders) b.append(el("div", "mono", k + "  " + n));
-  cols.append(a, b); c.append(cols);
-
-  const acts = el("div", "acts");
-  const mk = el("button", "p", "These are one thing →");
-  const skip = el("button", "s", "Correctly separate — skip");
-  acts.append(mk, skip);
-  c.append(acts);
-
-  mk.onclick = () => {
-    acts.textContent = "";
-    const name = el("input");
-    name.setAttribute("list", "entrynames");      // every existing entry, autocompleted
-    name.value = t.top;                           // default to the entry already holding most
-    const tier = el("select");
-    for (const o of ["tooling", "framework", "foundation", "feature", "content"])
-      tier.append(new Option(o, o));
-    const go = el("button", "p", "Add rule");
-    const cancel = el("button", "s", "Cancel");
-    const hint = el("div", "sub");
-    acts.append(el("span", "sub", "Belongs to:"), name, tier, go, cancel);
-    c.append(hint);
-
-    // Naming is where curation goes wrong silently: typing "Luna" when the catalogue says
-    // "Luna Scripting System" does not extend that entry, it CARVES 19 files out of it,
-    // and "ccc" beside "CCC" makes two products out of one. Say which is about to happen.
-    const judge = () => {
-      const v = name.value.trim();
-      // Candidates are the catalogue PLUS entries declared by rules written this session:
-      // "ccc" and "CCC" both look new against the database, and only collide with each
-      // other, which is exactly how one backoffice became two products.
-      const pending = pendingNames().filter(n => !S.catalogue.some(r => r.name === n));
-      const all = S.catalogue.map(r => r.name).concat(pending);
-      const exact = S.catalogue.find(r => r.name === v);
-      if (exact) {
-        tier.value = exact.tier;
-        hint.className = "sub ok";
-        hint.textContent = "↳ adds to the existing entry “" + exact.name + "” ("
-          + exact.n_files + " files, " + exact.tier + ")";
-        return;
-      }
-      if (pending.includes(v)) {
-        hint.className = "sub ok";
-        hint.textContent = "↳ adds to “" + v + "”, which you declared earlier in this session";
-        return;
-      }
-      const lower = v.toLowerCase();
-      const sameWord = all.filter(n => n !== v && lower && n.toLowerCase() === lower);
-      if (sameWord.length) {
-        hint.className = "sub err";
-        hint.textContent = "⚠ “" + sameWord[0] + "” already exists and differs only in "
-          + "capitalisation — names are case-sensitive, so this would make a second entry.";
-        return;
-      }
-      const near = all.filter(n => n !== v && lower
-        && (n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase())));
-      if (near.length) {
-        hint.className = "sub err";
-        hint.textContent = "⚠ creates a NEW entry and takes files away from: "
-          + near.slice(0, 3).map(n => "“" + n + "”").join(", ")
-          + ". Pick the exact name to extend one instead.";
-      } else {
-        hint.className = "sub";
-        hint.textContent = v ? "+ creates a new entry “" + v + "”" : "";
-      }
-    };
-    name.oninput = judge;
-    name.focus(); name.select(); judge();
-
-    cancel.onclick = () => { renderReview(); };
-    go.onclick = async () => {
-      if (!name.value.trim()) { hint.className = "sub err"; hint.textContent = "Name it first."; return; }
-      await addRule('entry "' + name.value.trim() + '"\n  claim  ' + t.dir + '/**\n  tier   ' + tier.value);
-      c.className = "card done";
-      acts.textContent = "";
-      hint.textContent = "";
-      acts.append(el("span", "ok", "✓ rule added"));
-    };
-  };
-  skip.onclick = async () => {
-    await addRule("keep-split " + t.dir + "/**");
-    c.className = "card done";
-    c.querySelector(".acts").textContent = "";
-    c.querySelector(".acts").append(el("span", "ok", "✓ recorded as correctly separate"));
-  };
-  return c;
-}
-
-// ---------- Catalogue --------------------------------------------------------------
-function renderCatalogue() {
-  const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", "Catalogue"));
-  const q = el("input"); q.placeholder = "filter by name…";
-  q.style.margin = "10px 0"; m.append(q);
-  const box = el("div"); m.append(box);
-  const draw = () => {
-    box.textContent = "";
-    const f = q.value.trim().toLowerCase();
-    for (const tier of ["foundation", "framework", "feature", "tooling", "content"]) {
-      const rows = S.catalogue.filter(r => r.tier === tier
-        && (!f || r.name.toLowerCase().includes(f)));
-      if (!rows.length) continue;
-      box.append(el("h2", "", tier + " (" + rows.length + ")"));
-      const tb = el("table"); const hr = el("tr");
-      ["entry", "files", "commits", "used by", "active", "set by", ""].forEach((h, i) =>
-        hr.append(el("th", (i >= 1 && i <= 3) ? "num" : "", h)));
-      tb.append(hr);
-      rows.sort((x, y) => y.commits - x.commits);
-      for (const r of rows) {
-        const tr = el("tr");
-        const td = el("td"); td.append(el("b", "", r.name));
-        if (r.definition) td.append(el("div", "sub", r.definition.slice(0, 140)));
-        const d = el("details"); d.append(el("summary", "", "territory"));
-        for (const x of r.files) d.append(el("div", "mono", x));
-        if (r.n_files > r.files.length)
-          d.append(el("div", "sub", "… " + (r.n_files - r.files.length) + " more"));
-        td.append(d); tr.append(td);
-        tr.append(el("td", "num", String(r.n_files)), el("td", "num", String(r.commits)),
-                  el("td", "num", String(r.fan_in)),
-                  el("td", "", r.born + "→" + r.last + (r.lifecycle === "removed" ? " ✕" : "")),
-                  el("td", "", r.tier_from));
-        const act = el("td"); const sel = el("select");
-        sel.append(new Option("change tier…", ""));
-        for (const o of ["foundation", "framework", "feature", "tooling", "content"])
-          if (o !== r.tier) sel.append(new Option("→ " + o, o));
-        sel.onchange = () => { if (!sel.value) return;
-          addRule('entry "' + r.name + '"\n  tier   ' + sel.value);
-          sel.disabled = true; };
-        act.append(sel); tr.append(act);
-        tb.append(tr);
-      }
-      box.append(tb);
-    }
-  };
-  q.oninput = draw; draw();
-}
-
-// ---------- Rules ------------------------------------------------------------------
-// The plan is the WHOLE statement of your curation, not a log of actions: every run
-// replays it from nothing. So there is no undo stack to unwind — changing a rule means
-// changing its text, and deleting one removes its effect completely.
-function parsePlan(text) {
-  const lines = text.split("\n");
-  const blocks = [];
-  let cur = null;
-  lines.forEach((raw, i) => {
-    const s = raw.split("#")[0].trim();
-    if (!s) return;
-    const verb = s.split(/\s+/)[0].toLowerCase();
-    const rest = s.slice(verb.length).trim();
-    if (verb === "entry") {
-      cur = { kind: "entry", name: rest.replace(/^["']|["']$/g, ""), from: i, to: i,
-              claims: [], rejects: [], tier: null };
-      blocks.push(cur);
-    } else if (verb === "merge" || verb === "reject" && /^["']/.test(rest)
-               || verb === "keep-split") {
-      blocks.push({ kind: verb, text: s, from: i, to: i });
-      cur = null;
-    } else if (cur) {
-      cur.to = i;
-      if (verb === "claim") cur.claims.push(rest);
-      else if (verb === "reject") cur.rejects.push(rest);
-      else if (verb === "tier") cur.tier = rest;
-    }
-  });
-  return blocks;
-}
-
-function spliceLines(from, to) {
-  const lines = planText.split("\n");
-  lines.splice(from, to - from + 1);
-  planText = lines.join("\n").replace(/\n{3,}/g, "\n\n");
-  dirty++;
-}
-
-function renderRules() {
-  const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", "Rules"));
-  m.append(el("div", "sub", "This file IS your curation — it is replayed from scratch on "
-    + "every run, so changing a rule's text is how you change what it did, and deleting a "
-    + "rule undoes it completely. There is nothing else to unwind."));
-
-  const blocks = parsePlan(planText);
-  const dup = {};
-  for (const b of blocks) if (b.kind === "entry") dup[b.name] = (dup[b.name] || 0) + 1;
-
-  const list = el("div");
-  for (const b of blocks) {
-    const c = el("div", "card");
-    if (b.kind === "entry") {
-      c.append(el("h3", "", b.name));
-      if (dup[b.name] > 1)
-        c.append(el("div", "sub err", "⚠ “" + b.name + "” is declared " + dup[b.name]
-          + " times — the blocks COMBINE into one entry. Delete one to separate them."));
-      const f = el("div", "facts");
-      f.textContent = (b.tier ? b.tier + " · " : "")
-        + b.claims.length + " claim" + (b.claims.length === 1 ? "" : "s")
-        + (b.rejects.length ? " · " + b.rejects.length + " reject" : "");
-      c.append(f);
-      for (const g of b.claims) c.append(el("div", "mono", "claim  " + g));
-      for (const g of b.rejects) c.append(el("div", "mono", "reject " + g));
-    } else {
-      c.append(el("div", "mono", b.text));
-    }
-    const acts = el("div", "acts");
-    const ren = el("button", "s", "Rename");
-    const del = el("button", "s", "Delete");
-    if (b.kind === "entry") acts.append(ren);
-    acts.append(del);
-    c.append(acts);
-    ren.onclick = () => {
-      const inp = el("input");
-      inp.setAttribute("list", "entrynames");
-      inp.value = b.name;
-      const go = el("button", "p", "Rename");
-      acts.textContent = ""; acts.append(inp, go);
-      inp.focus(); inp.select();
-      go.onclick = () => {
-        const lines = planText.split("\n");
-        lines[b.from] = lines[b.from].replace(/".*"|'.*'/, '"' + inp.value.trim() + '"');
-        planText = lines.join("\n"); dirty++; render();
-      };
-    };
-    del.onclick = () => { spliceLines(b.from, b.to); render(); };
-    list.append(c);
-  }
-  if (!blocks.length) list.append(el("p", "sub", "No rules yet."));
-  m.append(list);
-
-  const d = el("details");
-  d.append(el("summary", "", "edit as text"));
-  const ta = el("textarea"); ta.value = planText;
-  ta.oninput = () => { planText = ta.value; dirty++; setStatus(); };
-  d.append(ta); m.append(d);
-  const pv = el("div"); pv.id = "pv"; m.append(pv);
-}
-
-async function doPreview() {
-  const r = await (await fetch("/api/preview", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (view !== "rules") { view = "rules"; setNav(); render(); }
-  if (r.error) { setStatus(r.error, "err"); return; }
-  if (r.trees) S.trees = r.trees;
-  setStatus(r.report.moved + " files move · " + r.report.claimed + " newly claimed · "
-    + r.report.merges + " merges", "ok");
-  const pv = $("pv"); if (!pv) return;
-  pv.textContent = "";
-  if (r.warnings && r.warnings.length) {
-    pv.append(el("h2", "", "Check these first"));
-    for (const w of r.warnings) pv.append(el("div", "sub err", "⚠ " + w));
-  }
-  if (!r.moves.length) { pv.append(el("p", "sub", "No file would change owner.")); return; }
-  pv.append(el("h2", "", "What would change"));
-  const tb = el("table"); const hr = el("tr");
-  ["entry", "now", "after", ""].forEach((h, i) =>
-    hr.append(el("th", i ? "num" : "", h)));
-  tb.append(hr);
-  for (const mv of r.moves) {
-    const tr = el("tr");
-    tr.append(el("td", "", mv.name), el("td", "num", String(mv.before)),
-              el("td", "num", String(mv.after)),
-              el("td", "", mv.new ? "new entry" : mv.gone ? "removed"
-                 : (mv.after > mv.before ? "+" : "") + (mv.after - mv.before)));
-    tb.append(tr);
-  }
-  pv.append(tb);
-}
-
-async function doSave() {
-  const r = await (await fetch("/api/save", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (r.error) { setStatus(r.error, "err"); return; }
-  dirty = 0;
-  setStatus("Saved to " + r.saved + " — now run:  gitchronicle update", "ok");
-}
-
-const VIEWS = { review: renderReview, catalogue: renderCatalogue, rules: renderRules };
-function render() { $("how").innerHTML = HOW[view]; VIEWS[view](); setStatus(); }
-function setNav() {
-  $("bR").className = view === "review" ? "on" : "";
-  $("bC").className = view === "catalogue" ? "on" : "";
-  $("bL").className = view === "rules" ? "on" : "";
-}
-$("bR").onclick = () => { view = "review"; setNav(); render(); };
-$("bC").onclick = () => { view = "catalogue"; setNav(); render(); };
-$("bL").onclick = () => { view = "rules"; setNav(); render(); };
-$("bPrev").onclick = doPreview;
-$("bSave").onclick = doSave;
-load();
-</script></body></html>
-"""
+    It used to be a module constant, which meant an edit did nothing until the process
+    restarted — and a studio serving last week's JavaScript looks exactly like a studio
+    with a bug in it. Reading a 30KB file per request costs nothing and makes what is on
+    disk the thing being served.
+    """
+    return _PAGE_FILE.read_bytes()

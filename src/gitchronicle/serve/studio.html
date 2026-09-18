@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gitchronicle studio</title>
+<style>
+:root {
+  --t-foundation:#2a78d6; --t-framework:#eb6834; --t-feature:#1baf7a;
+  --t-tooling:#eda100;    --t-content:#e87ba4;
+  --bg:#fff; --fg:#1a1d21; --muted:#69707a; --line:#e3e6ea; --side:#f6f7f9;
+        --acc:#2860c4; --chip:#eef2f9; --warn:#b4530a; --ok:#1e7a45; --card:#fff; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --t-foundation:#3987e5; --t-framework:#d95926; --t-feature:#199e70;
+    --t-tooling:#c98500;    --t-content:#d55181;
+    --bg:#14161a; --fg:#e6e8eb; --muted:#96a0ab; --line:#2a2f36; --side:#191c21;
+          --acc:#7aa5f0; --chip:#20293a; --warn:#e2933f; --ok:#5fc98c; --card:#181b20; }
+}
+* { box-sizing:border-box; margin:0 }
+body { background:var(--bg); color:var(--fg); font:14px/1.55 system-ui,-apple-system,sans-serif }
+header { display:flex; align-items:center; gap:14px; padding:10px 20px; border-bottom:1px solid var(--line) }
+header h1 { font-size:15px }
+nav { margin-left:auto; display:flex; gap:6px }
+nav button { background:none; border:1px solid var(--line); color:var(--fg); border-radius:6px;
+  padding:5px 13px; cursor:pointer; font-size:13px }
+nav button.on { background:var(--acc); border-color:var(--acc); color:#fff }
+#how { background:var(--side); border-bottom:1px solid var(--line); padding:9px 20px;
+  font-size:13px; color:var(--muted) }
+#how b { color:var(--fg); font-weight:600 }
+main { padding:18px 20px 90px; max-width:980px }
+h2 { font-size:17px; margin-bottom:4px }
+.sub { color:var(--muted); font-size:13px; max-width:80ch }
+.card { border:1px solid var(--line); background:var(--card); border-radius:10px;
+  padding:14px 16px; margin:12px 0 }
+.card.done { opacity:.45 }
+.card h3 { font-size:14px; font-family:ui-monospace,Menlo,monospace; margin-bottom:3px }
+.facts { color:var(--muted); font-size:12.5px; margin-bottom:9px }
+.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted) }
+.cols { display:flex; gap:26px; flex-wrap:wrap; margin:8px 0 12px }
+.cols > div { min-width:220px } .cols h4 { font-size:11.5px; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--muted); margin-bottom:4px; font-weight:500 }
+.acts { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+button.p { background:var(--acc); border:1px solid var(--acc); color:#fff; border-radius:6px;
+  padding:5px 13px; cursor:pointer; font-size:13px }
+button.s { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px;
+  padding:5px 13px; cursor:pointer; font-size:13px }
+button.s:hover { color:var(--fg); border-color:var(--acc) }
+input,select { background:var(--bg); color:var(--fg); border:1px solid var(--line);
+  border-radius:6px; padding:5px 9px; font-size:13px; font-family:inherit }
+input { min-width:240px }
+table { border-collapse:collapse; width:100%; font-size:13px }
+th,td { text-align:left; padding:5px 9px; border-bottom:1px solid var(--line); vertical-align:top }
+th { color:var(--muted); font-weight:500; font-size:12px }
+td.num,th.num { text-align:right; font-variant-numeric:tabular-nums }
+.tier { display:inline-block; font-size:11px; padding:1px 8px; border-radius:99px;
+  background:var(--chip); color:var(--muted) }
+textarea { width:100%; height:40vh; background:var(--side); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12.5px }
+#bar { position:fixed; left:0; right:0; bottom:0; background:var(--card);
+  border-top:1px solid var(--line); padding:10px 20px; display:flex; gap:12px; align-items:center }
+#bar .grow { flex:1; color:var(--muted); font-size:13px }
+.err { color:var(--warn) } .ok { color:var(--ok) }
+.band { margin:16px 0 6px; font-size:11.5px; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--muted); display:flex; align-items:center; gap:8px }
+.band i { width:9px; height:9px; border-radius:2px; display:inline-block }
+.nodes { display:flex; flex-wrap:wrap; gap:6px }
+.node { border:1px solid var(--line); border-radius:6px; padding:3px 9px; cursor:pointer;
+  font-size:12.5px; background:var(--bg); display:flex; align-items:center; gap:6px }
+.node i { width:8px; height:8px; border-radius:2px; flex:none }
+.node.dim { opacity:.25 } .node.sel { border-color:var(--fg); font-weight:600 }
+.node.up { border-color:var(--t-foundation) } .node.down { border-color:var(--t-framework) }
+.node small { color:var(--muted); font-variant-numeric:tabular-nums }
+.chap { border-left:2px solid var(--line); padding:2px 0 10px 14px; margin-left:5px }
+.chap b { font-size:13.5px } .chap .when { color:var(--muted); font-size:12px }
+.chap p { margin:4px 0; max-width:78ch }
+.hash { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:var(--muted) }
+details summary { cursor:pointer; color:var(--muted); font-size:12.5px }
+</style></head><body>
+<header><h1>gitchronicle studio</h1>
+<nav><button id="bR" class="on">Review</button><button id="bC">Catalogue</button>
+<button id="bG">Map</button><button id="bS">Story</button><button id="bL">Rules</button></nav></header>
+<div id="how"></div>
+<datalist id="entrynames"></datalist>
+<main id="main">loading…</main>
+<div id="bar"><span class="grow" id="status"></span>
+  <button class="s" id="bPrev">Preview changes</button>
+  <button class="p" id="bSave">Save rules</button></div>
+<script>
+"use strict";
+let S = null, view = "review", planText = "", dirty = 0, skipped = new Set();
+const $ = id => document.getElementById(id);
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c;
+  if (x !== undefined) e.textContent = x; return e; };
+
+const HOW = {
+  review: "<b>Step 1 of 3 — Review.</b> Each card is one directory the catalogue split "
+    + "across several entries. Look at the filenames: if they are all parts of <b>one "
+    + "thing you built</b>, make it one entry. If they are genuinely different features "
+    + "that happen to share a folder, skip it — being split is correct there.",
+  catalogue: "<b>Everything the tool found.</b> Grouped by tier. <b>set by</b> tells you "
+    + "whether you decided a tier or the tool guessed. Change any guess you disagree with.",
+  map: "<b>What is built on what.</b> Tiers are layers: foundations at the bottom, the "
+    + "things that use them above. Click an entry to light up what it uses and what uses "
+    + "it. Only entries with import edges appear — the rest stand alone.",
+  story: "<b>How it came to be.</b> Chapters break where the work genuinely stopped, and a "
+    + "long run of upkeep is one chapter rather than one per month. Run "
+    + "<b>gitchronicle update --chronicle</b> to narrate them.",
+  rules: "<b>Step 2 and 3 — Preview, then Save.</b> These rules are replayed on every run, "
+    + "so they survive new commits. Preview shows exactly which files move before anything "
+    + "is written. After saving, run <b>gitchronicle update</b> to rebuild."
+};
+
+async function load() {
+  S = await (await fetch("/api/state")).json();
+  planText = S.plan;
+  const dl = $("entrynames"); dl.textContent = "";
+  for (const r of S.catalogue.slice().sort((a, b) => a.name.localeCompare(b.name)))
+    dl.append(new Option(r.name));
+  render();
+}
+
+function setStatus(msg, cls) {
+  const s = $("status");
+  s.className = "grow " + (cls || "");
+  s.textContent = msg || (dirty
+    ? dirty + " unsaved rule" + (dirty > 1 ? "s" : "") + " — preview, then save"
+    : "No unsaved changes. Editing " + S.plan_path);
+}
+
+function pendingNames() {
+  const out = [];
+  const re = /^entry\s+"([^"]*)"/gm;
+  let m; while ((m = re.exec(planText))) out.push(m[1]);
+  return out;
+}
+
+async function addRule(text) {
+  planText = planText.replace(/\s*$/, "") + "\n\n" + text.trim() + "\n";
+  dirty++; setStatus();
+  await refreshTrees();       // a question just answered must leave the queue at once
+}
+
+async function refreshTrees() {
+  const r = await (await fetch("/api/preview", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan: planText }) })).json();
+  if (r && r.trees) S.trees = r.trees;
+  return r;
+}
+
+// ---------- Review ----------------------------------------------------------------
+function renderReview() {
+  const m = $("main"); m.textContent = "";
+  const open = S.trees.filter(t => !skipped.has(t.dir) && !t.handled);
+  const done = S.trees.filter(t => t.handled);
+  m.append(el("h2", "", "Directories the catalogue split up"));
+  m.append(el("div", "sub", open.length + " still open, most suspicious first. "
+    + "A directory is suspicious when no single entry owns most of it and nothing in the "
+    + "catalogue is named after it."));
+  for (const t of open.slice(0, 40)) m.append(card(t));
+  if (!open.length) m.append(el("p", "sub", "Nothing left to review."));
+
+  if (done.length) {
+    const d = el("details");
+    d.style.marginTop = "18px";
+    d.append(el("summary", "", done.length + " already covered by a rule"));
+    for (const t of done) {
+      const r = el("div", "sub");
+      r.append(el("span", "mono", t.dir), " → ", el("b", "", t.handled));
+      d.append(r);
+    }
+    m.append(d);
+  }
+}
+
+function card(t) {
+  const c = el("div", "card");
+  c.append(el("h3", "", t.dir));
+  c.append(el("div", "facts", t.files + " files · split across " + t.entries
+    + " entries · largest holder “" + t.top + "” has only "
+    + Math.round(t.top_share * 100) + "%"));
+
+  const cols = el("div", "cols");
+  const a = el("div"); a.append(el("h4", "", "what is in it"));
+  for (const s of t.samples) a.append(el("div", "mono", s));
+  const b = el("div"); b.append(el("h4", "", "currently filed under"));
+  for (const [n, k] of t.holders) b.append(el("div", "mono", k + "  " + n));
+  cols.append(a, b); c.append(cols);
+
+  const acts = el("div", "acts");
+  const mk = el("button", "p", "These are one thing →");
+  const skip = el("button", "s", "Correctly separate — skip");
+  acts.append(mk, skip);
+  c.append(acts);
+
+  mk.onclick = () => {
+    acts.textContent = "";
+    const name = el("input");
+    name.setAttribute("list", "entrynames");      // every existing entry, autocompleted
+    name.value = t.top;                           // default to the entry already holding most
+    const tier = el("select");
+    for (const o of ["tooling", "framework", "foundation", "feature", "content"])
+      tier.append(new Option(o, o));
+    const go = el("button", "p", "Add rule");
+    const cancel = el("button", "s", "Cancel");
+    const hint = el("div", "sub");
+    acts.append(el("span", "sub", "Belongs to:"), name, tier, go, cancel);
+    c.append(hint);
+
+    // Naming is where curation goes wrong silently: typing "Luna" when the catalogue says
+    // "Luna Scripting System" does not extend that entry, it CARVES 19 files out of it,
+    // and "ccc" beside "CCC" makes two products out of one. Say which is about to happen.
+    const judge = () => {
+      const v = name.value.trim();
+      // Candidates are the catalogue PLUS entries declared by rules written this session:
+      // "ccc" and "CCC" both look new against the database, and only collide with each
+      // other, which is exactly how one backoffice became two products.
+      const pending = pendingNames().filter(n => !S.catalogue.some(r => r.name === n));
+      const all = S.catalogue.map(r => r.name).concat(pending);
+      const exact = S.catalogue.find(r => r.name === v);
+      if (exact) {
+        tier.value = exact.tier;
+        hint.className = "sub ok";
+        hint.textContent = "↳ adds to the existing entry “" + exact.name + "” ("
+          + exact.n_files + " files, " + exact.tier + ")";
+        return;
+      }
+      if (pending.includes(v)) {
+        hint.className = "sub ok";
+        hint.textContent = "↳ adds to “" + v + "”, which you declared earlier in this session";
+        return;
+      }
+      const lower = v.toLowerCase();
+      const sameWord = all.filter(n => n !== v && lower && n.toLowerCase() === lower);
+      if (sameWord.length) {
+        hint.className = "sub err";
+        hint.textContent = "⚠ “" + sameWord[0] + "” already exists and differs only in "
+          + "capitalisation — names are case-sensitive, so this would make a second entry.";
+        return;
+      }
+      const near = all.filter(n => n !== v && lower
+        && (n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase())));
+      if (near.length) {
+        hint.className = "sub err";
+        hint.textContent = "⚠ creates a NEW entry and takes files away from: "
+          + near.slice(0, 3).map(n => "“" + n + "”").join(", ")
+          + ". Pick the exact name to extend one instead.";
+      } else {
+        hint.className = "sub";
+        hint.textContent = v ? "+ creates a new entry “" + v + "”" : "";
+      }
+    };
+    name.oninput = judge;
+    name.focus(); name.select(); judge();
+
+    cancel.onclick = () => { renderReview(); };
+    go.onclick = async () => {
+      if (!name.value.trim()) { hint.className = "sub err"; hint.textContent = "Name it first."; return; }
+      await addRule('entry "' + name.value.trim() + '"\n  claim  ' + t.dir + '/**\n  tier   ' + tier.value);
+      c.className = "card done";
+      acts.textContent = "";
+      hint.textContent = "";
+      acts.append(el("span", "ok", "✓ rule added"));
+    };
+  };
+  skip.onclick = async () => {
+    await addRule("keep-split " + t.dir + "/**");
+    c.className = "card done";
+    c.querySelector(".acts").textContent = "";
+    c.querySelector(".acts").append(el("span", "ok", "✓ recorded as correctly separate"));
+  };
+  return c;
+}
+
+// ---------- Catalogue --------------------------------------------------------------
+function renderCatalogue() {
+  const m = $("main"); m.textContent = "";
+  m.append(el("h2", "", "Catalogue"));
+  const q = el("input"); q.placeholder = "filter by name…";
+  q.style.margin = "10px 0"; m.append(q);
+  const box = el("div"); m.append(box);
+  const draw = () => {
+    box.textContent = "";
+    const f = q.value.trim().toLowerCase();
+    for (const tier of ["foundation", "framework", "feature", "tooling", "content"]) {
+      const rows = S.catalogue.filter(r => r.tier === tier
+        && (!f || r.name.toLowerCase().includes(f)));
+      if (!rows.length) continue;
+      box.append(el("h2", "", tier + " (" + rows.length + ")"));
+      const tb = el("table"); const hr = el("tr");
+      ["entry", "files", "commits", "used by", "active", "set by", ""].forEach((h, i) =>
+        hr.append(el("th", (i >= 1 && i <= 3) ? "num" : "", h)));
+      tb.append(hr);
+      rows.sort((x, y) => y.commits - x.commits);
+      for (const r of rows) {
+        const tr = el("tr");
+        const td = el("td"); td.append(el("b", "", r.name));
+        if (r.definition) td.append(el("div", "sub", r.definition.slice(0, 140)));
+        const d = el("details"); d.append(el("summary", "", "territory"));
+        for (const x of r.files) d.append(el("div", "mono", x));
+        if (r.n_files > r.files.length)
+          d.append(el("div", "sub", "… " + (r.n_files - r.files.length) + " more"));
+        td.append(d); tr.append(td);
+        tr.append(el("td", "num", String(r.n_files)), el("td", "num", String(r.commits)),
+                  el("td", "num", String(r.fan_in)),
+                  el("td", "", r.born + "→" + r.last + (r.lifecycle === "removed" ? " ✕" : "")),
+                  el("td", "", r.tier_from));
+        const act = el("td"); const sel = el("select");
+        sel.append(new Option("change tier…", ""));
+        for (const o of ["foundation", "framework", "feature", "tooling", "content"])
+          if (o !== r.tier) sel.append(new Option("→ " + o, o));
+        sel.onchange = () => { if (!sel.value) return;
+          addRule('entry "' + r.name + '"\n  tier   ' + sel.value);
+          sel.disabled = true; };
+        act.append(sel); tr.append(act);
+        tb.append(tr);
+      }
+      box.append(tb);
+    }
+  };
+  q.oninput = draw; draw();
+}
+
+// ---------- Rules ------------------------------------------------------------------
+// The plan is the WHOLE statement of your curation, not a log of actions: every run
+// replays it from nothing. So there is no undo stack to unwind — changing a rule means
+// changing its text, and deleting one removes its effect completely.
+function parsePlan(text) {
+  const lines = text.split("\n");
+  const blocks = [];
+  let cur = null;
+  lines.forEach((raw, i) => {
+    const s = raw.split("#")[0].trim();
+    if (!s) return;
+    const verb = s.split(/\s+/)[0].toLowerCase();
+    const rest = s.slice(verb.length).trim();
+    if (verb === "entry") {
+      cur = { kind: "entry", name: rest.replace(/^["']|["']$/g, ""), from: i, to: i,
+              claims: [], rejects: [], tier: null };
+      blocks.push(cur);
+    } else if (verb === "merge" || verb === "reject" && /^["']/.test(rest)
+               || verb === "keep-split") {
+      blocks.push({ kind: verb, text: s, from: i, to: i });
+      cur = null;
+    } else if (cur) {
+      cur.to = i;
+      if (verb === "claim") cur.claims.push(rest);
+      else if (verb === "reject") cur.rejects.push(rest);
+      else if (verb === "tier") cur.tier = rest;
+    }
+  });
+  return blocks;
+}
+
+function spliceLines(from, to) {
+  const lines = planText.split("\n");
+  lines.splice(from, to - from + 1);
+  planText = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  dirty++;
+}
+
+function renderRules() {
+  const m = $("main"); m.textContent = "";
+  m.append(el("h2", "", "Rules"));
+  m.append(el("div", "sub", "This file IS your curation — it is replayed from scratch on "
+    + "every run, so changing a rule's text is how you change what it did, and deleting a "
+    + "rule undoes it completely. There is nothing else to unwind."));
+
+  const blocks = parsePlan(planText);
+  const dup = {};
+  for (const b of blocks) if (b.kind === "entry") dup[b.name] = (dup[b.name] || 0) + 1;
+
+  const list = el("div");
+  for (const b of blocks) {
+    const c = el("div", "card");
+    if (b.kind === "entry") {
+      c.append(el("h3", "", b.name));
+      if (dup[b.name] > 1)
+        c.append(el("div", "sub err", "⚠ “" + b.name + "” is declared " + dup[b.name]
+          + " times — the blocks COMBINE into one entry. Delete one to separate them."));
+      const f = el("div", "facts");
+      f.textContent = (b.tier ? b.tier + " · " : "")
+        + b.claims.length + " claim" + (b.claims.length === 1 ? "" : "s")
+        + (b.rejects.length ? " · " + b.rejects.length + " reject" : "");
+      c.append(f);
+      for (const g of b.claims) c.append(el("div", "mono", "claim  " + g));
+      for (const g of b.rejects) c.append(el("div", "mono", "reject " + g));
+    } else {
+      c.append(el("div", "mono", b.text));
+    }
+    const acts = el("div", "acts");
+    const ren = el("button", "s", "Rename");
+    const del = el("button", "s", "Delete");
+    if (b.kind === "entry") acts.append(ren);
+    acts.append(del);
+    c.append(acts);
+    ren.onclick = () => {
+      const inp = el("input");
+      inp.setAttribute("list", "entrynames");
+      inp.value = b.name;
+      const go = el("button", "p", "Rename");
+      acts.textContent = ""; acts.append(inp, go);
+      inp.focus(); inp.select();
+      go.onclick = () => {
+        const lines = planText.split("\n");
+        lines[b.from] = lines[b.from].replace(/".*"|'.*'/, '"' + inp.value.trim() + '"');
+        planText = lines.join("\n"); dirty++; render();
+      };
+    };
+    del.onclick = () => { spliceLines(b.from, b.to); render(); };
+    list.append(c);
+  }
+  if (!blocks.length) list.append(el("p", "sub", "No rules yet."));
+  m.append(list);
+
+  const d = el("details");
+  d.append(el("summary", "", "edit as text"));
+  const ta = el("textarea"); ta.value = planText;
+  ta.oninput = () => { planText = ta.value; dirty++; setStatus(); };
+  d.append(ta); m.append(d);
+  const pv = el("div"); pv.id = "pv"; m.append(pv);
+}
+
+async function doPreview() {
+  const r = await (await fetch("/api/preview", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan: planText }) })).json();
+  if (view !== "rules") { view = "rules"; setNav(); render(); }
+  if (r.error) { setStatus(r.error, "err"); return; }
+  if (r.trees) S.trees = r.trees;
+  setStatus(r.report.moved + " files move · " + r.report.claimed + " newly claimed · "
+    + r.report.merges + " merges", "ok");
+  const pv = $("pv"); if (!pv) return;
+  pv.textContent = "";
+  if (r.warnings && r.warnings.length) {
+    pv.append(el("h2", "", "Check these first"));
+    for (const w of r.warnings) pv.append(el("div", "sub err", "⚠ " + w));
+  }
+  if (!r.moves.length) { pv.append(el("p", "sub", "No file would change owner.")); return; }
+  pv.append(el("h2", "", "What would change"));
+  const tb = el("table"); const hr = el("tr");
+  ["entry", "now", "after", ""].forEach((h, i) =>
+    hr.append(el("th", i ? "num" : "", h)));
+  tb.append(hr);
+  for (const mv of r.moves) {
+    const tr = el("tr");
+    tr.append(el("td", "", mv.name), el("td", "num", String(mv.before)),
+              el("td", "num", String(mv.after)),
+              el("td", "", mv.new ? "new entry" : mv.gone ? "removed"
+                 : (mv.after > mv.before ? "+" : "") + (mv.after - mv.before)));
+    tb.append(tr);
+  }
+  pv.append(tb);
+}
+
+async function doSave() {
+  const r = await (await fetch("/api/save", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan: planText }) })).json();
+  if (r.error) { setStatus(r.error, "err"); return; }
+  dirty = 0;
+  setStatus("Saved to " + r.saved + " — now run:  gitchronicle update", "ok");
+}
+
+
+// ---------- Map: a layered node-link graph ------------------------------------------
+// Tiers ARE the layers, foundations at the bottom, and an edge always points downward to
+// the thing it is built on. Within a layer nodes are ordered by the barycentre of their
+// neighbours and relaxed a few times — the standard trick for cutting edge crossings, and
+// the difference between a readable map and a hairball.
+const TIER_ORDER = ["feature", "tooling", "content", "framework", "foundation"];
+let sel = null, showAll = false;
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function crossings(order, layers, edges) {
+  const idx = new Map();
+  for (const t of layers) order.get(t).forEach((n, i) => idx.set(n, i));
+  let tot = 0;
+  for (let i = 0; i < layers.length - 1; i++) {
+    const A = new Set(order.get(layers[i])), B = new Set(order.get(layers[i + 1]));
+    const es = [];
+    for (const e of edges) {
+      if (A.has(e.src) && B.has(e.dst)) es.push([idx.get(e.src), idx.get(e.dst)]);
+      else if (B.has(e.src) && A.has(e.dst)) es.push([idx.get(e.dst), idx.get(e.src)]);
+    }
+    for (let a = 0; a < es.length; a++)
+      for (let b = a + 1; b < es.length; b++)
+        if ((es[a][0] - es[b][0]) * (es[a][1] - es[b][1]) < 0) tot++;
+  }
+  return tot;
+}
+
+function layout(nodes, edges, W, rowH) {
+  const layers = TIER_ORDER.filter(t => nodes.some(n => n.tier === t));
+  const order = new Map(layers.map(t =>
+    [t, nodes.filter(n => n.tier === t).map(n => n.name).sort()]));
+  const nbr = new Map(nodes.map(n => [n.name, []]));
+  for (const e of edges)
+    if (nbr.has(e.src) && nbr.has(e.dst)) {
+      nbr.get(e.src).push(e.dst); nbr.get(e.dst).push(e.src);
+    }
+
+  // Alternating down/up sweeps, keeping the best arrangement seen. Relaxing every layer
+  // at once against all its neighbours was tried and does not converge — it left MORE
+  // crossings than alphabetical order (85 vs 81). Sweeping against one fixed neighbour
+  // layer at a time takes this graph from 128 crossings to 31.
+  let best = new Map([...order].map(([k, v]) => [k, v.slice()]));
+  let bestC = crossings(order, layers, edges);
+  for (let sweep = 0; sweep < 8; sweep++) {
+    const down = sweep % 2 === 0;
+    const seq = down ? [...layers.keys()].slice(1) : [...layers.keys()].slice(0, -1).reverse();
+    for (const li of seq) {
+      const fixed = order.get(layers[li + (down ? -1 : 1)]);
+      const pos = new Map(fixed.map((n, i) => [n, i]));
+      const bary = new Map(order.get(layers[li]).map(n => {
+        const ns = nbr.get(n).filter(m => pos.has(m));
+        return [n, ns.length ? ns.reduce((a, m) => a + pos.get(m), 0) / ns.length : 1e9];
+      }));
+      order.get(layers[li]).sort((a, b) => bary.get(a) - bary.get(b) || a.localeCompare(b));
+    }
+    const c = crossings(order, layers, edges);
+    if (c < bestC) { bestC = c; best = new Map([...order].map(([k, v]) => [k, v.slice()])); }
+  }
+
+  const byName = new Map(nodes.map(n => [n.name, n]));
+  const pos = new Map();
+  layers.forEach((t, li) => {
+    const row = best.get(t);
+    const step = W / (row.length + 1);
+    row.forEach((name, i) => pos.set(name,
+      { x: step * (i + 1), y: 46 + li * rowH, tier: t, n: byName.get(name) }));
+  });
+  return { pos, layers, crossings: bestC };
+}
+
+function renderMap() {
+  const m = $("main"); m.textContent = "";
+  const deg = new Map();
+  for (const e of S.edges) {
+    if (!deg.has(e.src)) deg.set(e.src, { up: [], down: [] });
+    if (!deg.has(e.dst)) deg.set(e.dst, { up: [], down: [] });
+    deg.get(e.src).up.push(e.dst);      // src USES dst -> dst sits below
+    deg.get(e.dst).down.push(e.src);
+  }
+  let nodes = S.catalogue.filter(r => deg.has(r.name));
+  let edges = S.edges;
+  if (sel && !showAll) {
+    const keep = new Set([sel, ...deg.get(sel).up, ...deg.get(sel).down]);
+    nodes = nodes.filter(n => keep.has(n.name));
+    edges = edges.filter(e => keep.has(e.src) && keep.has(e.dst));
+  }
+
+  // lay out FIRST: the subtitle reports the crossing count, so it cannot be written
+  // before the layout that produces it
+  const W = 940, rowH = 118;
+  const { pos, layers, crossings: xs } = layout(nodes, edges, W, rowH);
+
+  m.append(el("h2", "", "The map"));
+  m.append(el("div", "sub", nodes.length + " entries, " + edges.length
+    + " import edges. An edge runs downward to the thing it is built on. "
+    + (sel ? "Showing " + sel + " and its neighbours." : "Click a node to focus it.")
+    + "  (" + xs + " crossings)"));
+
+  const row = el("div", "acts");
+  const b1 = el("button", "s", sel ? "clear focus" : "focus: none");
+  b1.onclick = () => { sel = null; render(); };
+  const b2 = el("button", "s", showAll ? "focused view" : "keep whole graph");
+  b2.onclick = () => { showAll = !showAll; render(); };
+  row.append(b1); if (sel) row.append(b2);
+  m.append(row);
+
+  const H = 60 + layers.length * rowH;
+  const svg = sv("svg", { viewBox: `0 0 ${W + 40} ${H}`, width: "100%", height: H,
+                          style: "overflow:visible" });
+
+  layers.forEach((t, li) => {
+    const y = 46 + li * rowH;
+    svg.append(sv("line", { x1: 0, y1: y, x2: W + 30, y2: y, stroke: "var(--line)",
+                            "stroke-width": 1 }));
+    const lab = sv("text", { x: 0, y: y - 12, fill: "var(--muted)", "font-size": 10.5,
+                             "letter-spacing": "0.07em" });
+    lab.textContent = t.toUpperCase();
+    svg.append(lab);
+  });
+
+  const rel = sel ? deg.get(sel) : null;
+  for (const e of edges) {
+    const a = pos.get(e.src), b = pos.get(e.dst);
+    if (!a || !b) continue;
+    const hot = sel && (e.src === sel || e.dst === sel);
+    const mid = (a.y + b.y) / 2;
+    svg.append(sv("path", {
+      d: `M${a.x},${a.y} C${a.x},${mid} ${b.x},${mid} ${b.x},${b.y}`,
+      fill: "none", stroke: hot ? "var(--t-" + b.tier + ")" : "var(--fg)",
+      "stroke-width": hot ? 1.6 : 0.8,
+      "stroke-opacity": sel ? (hot ? 0.85 : 0.06) : 0.16,
+    }));
+  }
+
+  for (const [name, p] of pos) {
+    const fan = p.n.fan_in || 0;
+    const r = Math.min(11, 3.5 + Math.sqrt(fan) * 2.2);
+    const focused = !sel || name === sel
+      || (rel && (rel.up.includes(name) || rel.down.includes(name)));
+    const g = sv("g", { style: "cursor:pointer" });
+    g.append(sv("circle", { cx: p.x, cy: p.y, r: r,
+      fill: "var(--t-" + p.tier + ")", stroke: "var(--bg)", "stroke-width": 2,
+      "fill-opacity": focused ? 1 : 0.25 }));
+    // every node is labelled: the palette warns on contrast at this surface, so identity
+    // must never rest on colour alone
+    if (fan >= 2 || name === sel || nodes.length <= 30 || focused && sel) {
+      const tx = sv("text", { x: p.x, y: p.y - r - 5, "text-anchor": "middle",
+        "font-size": 10, fill: "var(--fg)", "fill-opacity": focused ? 0.95 : 0.3 });
+      tx.textContent = name.length > 26 ? name.slice(0, 25) + "…" : name;
+      g.append(tx);
+    }
+    const ttl = sv("title");
+    ttl.textContent = `${name}\n${p.tier} · used by ${fan} · ${p.n.n_files} files`;
+    g.append(ttl);
+    g.onclick = () => { sel = (sel === name ? null : name); showAll = false; render(); };
+    svg.append(g);
+  }
+  m.append(svg);
+
+  if (sel && rel) {
+    const d = el("div", "card");
+    d.append(el("h3", "", sel));
+    d.append(el("div", "sub", "uses (" + rel.up.length + "): " + (rel.up.join(", ") || "nothing")));
+    d.append(el("div", "sub", "used by (" + rel.down.length + "): " + (rel.down.join(", ") || "nothing")));
+    const acts = el("div", "acts");
+    const b = el("button", "s", "read its story →");
+    b.onclick = () => { storyFor = sel; view = "story"; setNav(); render(); };
+    acts.append(b); d.append(acts);
+    m.append(d);
+  }
+}
+
+// ---------- Story -------------------------------------------------------------------
+let storyFor = null;
+
+async function renderStory() {
+  const m = $("main"); m.textContent = "";
+  m.append(el("h2", "", "Story"));
+  if (!S.chapters)
+    m.append(el("div", "sub err",
+      "No chapters yet — run  gitchronicle update --chronicle"));
+  const pick = el("input");
+  pick.setAttribute("list", "entrynames");
+  pick.placeholder = "entry name…";
+  pick.value = storyFor || "";
+  pick.style.margin = "8px 0";
+  m.append(pick);
+  const box = el("div"); m.append(box);
+  const draw = async () => {
+    const name = pick.value.trim();
+    if (!name) { box.textContent = ""; return; }
+    storyFor = name;
+    const s = await (await fetch("/api/story?entry=" + encodeURIComponent(name))).json();
+    box.textContent = "";
+    if (s.error) { box.append(el("div", "sub err", s.error)); return; }
+    box.append(el("div", "facts", s.tier + " · " + s.born + " → " + s.last + " · "
+      + s.commits + " commits"));
+    if (s.summary) box.append(el("p", "sub", s.summary));
+    if (!s.chapters.length) {
+      box.append(el("p", "sub", "Not narrated yet."));
+      return;
+    }
+    for (const c of s.chapters) {
+      const d = el("div", "chap");
+      d.append(el("b", "", c.title || "(untitled)"), " ",
+               el("span", "when", c.start + " → " + c.end));
+      if (c.narrative) d.append(el("p", "", c.narrative));
+      const row = el("div");
+      for (const h of c.commits.slice(0, 10))
+        row.append(el("span", "hash", h.slice(0, 10) + "  "));
+      d.append(row);
+      box.append(d);
+    }
+  };
+  pick.onchange = draw; pick.oninput = () => {};
+  if (storyFor) await draw();
+}
+
+const VIEWS = { review: renderReview, map: renderMap, story: renderStory, catalogue: renderCatalogue, rules: renderRules };
+function render() { $("how").innerHTML = HOW[view]; VIEWS[view](); setStatus(); }
+function setNav() {
+  $("bR").className = view === "review" ? "on" : "";
+  $("bG").className = view === "map" ? "on" : "";
+  $("bS").className = view === "story" ? "on" : "";
+  $("bC").className = view === "catalogue" ? "on" : "";
+  $("bL").className = view === "rules" ? "on" : "";
+}
+$("bR").onclick = () => { view = "review"; setNav(); render(); };
+$("bC").onclick = () => { view = "catalogue"; setNav(); render(); };
+$("bG").onclick = () => { view = "map"; setNav(); render(); };
+$("bS").onclick = () => { view = "story"; setNav(); render(); };
+$("bL").onclick = () => { view = "rules"; setNav(); render(); };
+$("bPrev").onclick = doPreview;
+$("bSave").onclick = doSave;
+load();
+</script></body></html>
