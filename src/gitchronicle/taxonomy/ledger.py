@@ -53,7 +53,8 @@ _HEADER = """\
 #
 #   entry "<name>"          declare/curate an entry
 #     claim  <glob>           these files are its territory, wherever they live
-#     reject <glob>           ... except these
+#     claim  <glob> from "<n>"  ... but only those entry <n> currently holds
+#     reject <glob>           ... except these; on a proposed entry, gives them back
 #     tier   <t>              foundation | framework | feature | content | tooling
 #     note   <text>           your own words, carried into the knowledge base
 #     lock                    auto-runs may never rename or re-tier it
@@ -73,6 +74,9 @@ class Entry:
     def __init__(self, name: str):
         self.name = name
         self.claims: list[str] = []
+        # (glob, holder): only the files `holder` currently has. Sorting one entry's files
+        # into another must not also sweep up the rest of the repo under the same folder.
+        self.takes: list[tuple[str, str]] = []
         self.rejects: list[str] = []
         self.tier: str | None = None
         self.note: str | None = None
@@ -150,7 +154,11 @@ class Ledger:
             elif cur is None:
                 raise LedgerError(f"line {lineno}: '{verb}' outside an entry block")
             elif verb == "claim":
-                cur.claims.append(rest)
+                m = re.fullmatch(r'(\S+)\s+from\s+("[^"]*"|\'[^\']*\')', rest)
+                if m:
+                    cur.takes.append((m.group(1), _unquote(m.group(2), lineno)))
+                else:
+                    cur.claims.append(rest)
             elif verb == "reject":
                 cur.rejects.append(rest)
             elif verb == "tier":
@@ -176,6 +184,22 @@ class Ledger:
                 return e.name
         return None
 
+    def destination(self, path: str, holder: str) -> str | None:
+        """Where the rules send a file the assembly gave to ``holder``: another entry's
+        name, "" when ``holder`` rejects it and nobody claims it, None when it stays."""
+        own = self.owner(path)
+        if own is not None:
+            return None if own == holder else own
+        for x in self.entries:
+            if x.name != holder and any(src == holder and fnmatch.fnmatch(path, g)
+                                        and not any(fnmatch.fnmatch(path, r) for r in x.rejects)
+                                        for g, src in x.takes):
+                return x.name
+        e = next((x for x in self.entries if x.name == holder), None)
+        if e is not None and any(fnmatch.fnmatch(path, g) for g in e.rejects):
+            return ""
+        return None
+
     def apply(self, catalogue: dict[str, set[str]]) -> tuple[dict[str, set[str]], dict]:
         """Replay over a proposed catalogue (name -> territory).
 
@@ -185,16 +209,22 @@ class Ledger:
         """
         out = {n: set(fs) for n, fs in catalogue.items()}
         unplaced = out.pop("", set())
-        moved = claimed = 0
+        moved = claimed = released = 0
 
-        # 1. rules take territory from whoever the assembly gave it to
+        # 1. rules take territory from whoever the assembly gave it to, and an entry's own
+        #    rejects give back what the assembly wrongly gave it — without that, a blob
+        #    could only be carved by naming a new home for every piece of it
         for name, files in list(out.items()):
             for f in list(files):
-                own = self.owner(f)
-                if own is not None and own != name:
-                    files.discard(f)
-                    out.setdefault(own, set()).add(f)
+                dest = self.destination(f, name)
+                if dest is None:
+                    continue
+                files.discard(f)
+                if dest:
+                    out.setdefault(dest, set()).add(f)
                     moved += 1
+                else:
+                    released += 1
 
         # 2. a rule may also claim files the assembly never placed; the caller passes
         #    those in under the empty key, so curation can rescue unattributed evidence
@@ -215,15 +245,23 @@ class Ledger:
         for name in self.tombstones:
             out.pop(name, None)
 
-        return out, {"moved": moved, "claimed": claimed,
+        return out, {"moved": moved, "claimed": claimed, "released": released,
                      "entries": len(self.entries), "merges": len(self.merges),
                      "tombstones": len(self.tombstones)}
 
     def tiers(self) -> dict[str, str]:
-        return {e.name: e.tier for e in self.entries if e.tier}
+        return self._through_merges({e.name: e.tier for e in self.entries if e.tier})
 
     def notes(self) -> dict[str, str]:
-        return {e.name: e.note for e in self.entries if e.note}
+        return self._through_merges({e.name: e.note for e in self.entries if e.note})
+
+    def _through_merges(self, d: dict[str, str]) -> dict[str, str]:
+        """A renamed entry keeps what was said about it: rename is a merge into the new
+        name, and the tier set on the old name must not be lost on the way."""
+        for src, dst in self.merges:
+            if src in d and dst not in d:
+                d[dst] = d[src]
+        return d
 
     def locked(self) -> set[str]:
         return {e.name for e in self.entries if e.locked}
@@ -241,6 +279,7 @@ class Ledger:
         for e in self.entries:
             out.append(f'entry "{e.name}"')
             out += [f"  claim  {g}" for g in e.claims]
+            out += [f'  claim  {g} from "{src}"' for g, src in e.takes]
             out += [f"  reject {g}" for g in e.rejects]
             if e.tier:
                 out.append(f"  tier   {e.tier}")

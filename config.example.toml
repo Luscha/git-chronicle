@@ -26,6 +26,11 @@ method = "taxonomy"
 [untangle]
 workers = 6   # concurrent LLM calls; lower this if your provider rate-limits (HTTP 429)
 
+# OPTIONAL golden probes: things you know are ONE framework, as a path fragment. The
+# rebuild is refused when the assembly scatters one of them (>=70% must share a cluster).
+# [lineage.golden]
+# scripting = "/scripting/"
+
 [output]
 html = "build/graph.html"    # interactive knowledge-base browser (self-contained HTML)
 json = "build/domains.json"  # machine-readable export to build your own site on top of

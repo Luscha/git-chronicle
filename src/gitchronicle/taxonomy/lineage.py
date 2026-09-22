@@ -97,7 +97,6 @@ _CONTENT_SRC_SHARE = 0.2   # below this source-file share a cluster is content, 
 # pre-registered kill criteria (build/untangle_eval_protocol.md and the v0.3 plan)
 _KILL_BLOB_CONCERNS = 600
 _KILL_BLOB_COMPONENTS = 4
-_GOLDEN = {"luna": "/luna/", "augments": "augment", "uchtml": "uchtml"}
 _GOLDEN_MIN = 20       # a probe smaller than this is noise, not a gate
 _GOLDEN_SHARE = 0.70
 
@@ -157,7 +156,7 @@ def _root_exclusions(work: list[dict]) -> tuple[set, set]:
     return substrate, glue
 
 
-def build_lineage(conn, repo: str, log=print) -> dict:
+def build_lineage(conn, repo: str, log=print, golden_probes: dict | None = None) -> dict:
     cons = _work_concerns(conn)
     log(f"  {len(cons)} work concerns (import-origin filtered)")
 
@@ -353,13 +352,14 @@ def build_lineage(conn, repo: str, log=print) -> dict:
         })
     clusters.sort(key=lambda cl: (-cl["concerns"], cl["files"][0] if cl["files"] else ""))
 
-    report = _validate(clusters, work, log)
+    report = _validate(clusters, work, log, golden_probes)
     return {"work": work, "base": base, "clusters": clusters,
             "substrate": sorted(substrate), "glue": sorted(glue),
             "auth": auth, "root_of": root_of, "alive": _alive, "report": report}
 
 
-def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
+def _validate(clusters: list[dict], work: list[dict], log=print,
+              golden_probes: dict | None = None) -> dict:
     """Structural gates, pre-registered before any LLM is spent. Kill: v0.3 rejected."""
     shelved = [cl for cl in clusters if cl["content"]]
     code = [cl for cl in clusters if not cl["content"]]
@@ -368,8 +368,8 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
     if shelved:
         top = shelved[0]
         log(f"  {len(shelved)} content clusters shelved (top: "
-            f"{top['seed'] or '(micro)'} {top['concerns']} concerns — the proto/"
-            f"locale shipment stream, never presented as a feature)")
+            f"{top['seed'] or '(micro)'} {top['concerns']} concerns — mostly data, "
+            f"not code, so never presented as a feature)")
     sizes = Counter()
     for cl in clusters:
         sizes["1"] += cl["concerns"] == 1
@@ -398,8 +398,10 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
     # concerns, so a handful of newly untangled commits swings its share by forty points.
     # Probes below _GOLDEN_MIN are reported and not counted -- a gate that flips on 0.6%
     # more evidence measures noise, and this one blocked a scheduled rebuild doing it.
+    # probes are the owner's knowledge of their own repo ([lineage.golden] in config:
+    # name = path fragment); another repository has no luna to look for
     golden = {}
-    for name, pat in _GOLDEN.items():
+    for name, pat in (golden_probes or {}).items():
         hit_idx = {i for i, c in enumerate(work)
                    if sum(pat in f.lower() for f in c["files"]) * 2 > len(c["files"])}
         if not hit_idx:
@@ -413,6 +415,8 @@ def _validate(clusters: list[dict], work: list[dict], log=print) -> dict:
 
     log(f"  blob check: top cluster {big['concerns']} concerns / "
         f"{len(big['components'])} components -> {'KILL' if blob else 'ok'}")
+    if not golden:
+        log("  golden probes: none configured ([lineage.golden] in config)")
     for name, (share, n) in golden.items():
         log(f"  golden {name}: {share:.0%} of its {n} concerns in one cluster"
             + ("" if n >= _GOLDEN_MIN else f"  (sample < {_GOLDEN_MIN}, not scored)"))
@@ -546,10 +550,48 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
     notes = led.notes()
 
     retired = {s for s, _ in led.merges} | set(led.tombstones)
+    merged_into = dict(led.merges)
+
+    def ruled_away(i: int, name: str) -> str | None:
+        """Where the rules sent EVERY file of concern ``i``: the new owner, "" when they
+        were only released, None when the concern stays. A split that moved files but
+        left their commits behind would keep narrating the carved-out part as this
+        entry's story."""
+        files = work[i]["files"]
+        if not files:
+            return None
+        dests = set()
+        for f in files:
+            d = led.destination(f, name)
+            if d is None:
+                return None
+            dests.add(merged_into.get(d, d))
+        return dests.pop() if len(dests) == 1 else ""
+
+    followed: dict[str, list[int]] = defaultdict(list)
     for ci, cl in enumerate(feats):
         name, definition = named[ci]
         if name in retired:
-            continue          # the ledger merged or tombstoned it; no row, no dossier
+            # no row of its own; a merged entry's history goes with it to the target
+            if name in merged_into and merged_into[name] not in led.tombstones:
+                followed[merged_into[name]].extend(cl["idxs"])
+            continue
+        if led.exists():
+            keep = []
+            for i in cl["idxs"]:
+                dest = ruled_away(i, name)
+                if dest is None:
+                    keep.append(i)
+                elif dest and dest not in led.tombstones:
+                    followed[dest].append(i)
+            if len(keep) < len(cl["idxs"]):
+                if not keep and not final.get(ci):
+                    continue
+                cl = dict(cl, idxs=keep, concerns=len(keep),
+                          commits=len({work[i]["commit"] for i in keep}))
+                ats = sorted(work[i]["at"] for i in keep if work[i]["at"])
+                if ats:
+                    cl.update(born=ats[0][:10], last=ats[-1][:10])
         klass = "content" if cl["content"] else "feature"
         stems = json.dumps(([cl["seed"]] if cl["seed"] else [])[:8])
         cur = out.execute(
@@ -618,12 +660,16 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             f"WHERE cf.path IN ({','.join('?' * len(files))}) AND c.is_merge = 0",
             tuple(sorted(files))).fetchone()
         born, last, ncom = rows[0] or "", rows[1] or "", rows[2] or 0
+        # a rename is a merge into a new name: the description travels with it
+        inherited = next((named[ci][1] for ci in named
+                          if merged_into.get(named[ci][0]) == name and named[ci][1]), "")
+        definition = notes.get(name) or inherited
         cur = out.execute(
             "INSERT INTO domains (name, definition, summary, classification, status, "
             "lifecycle, tier, tier_from, born_at, first_seen, last_seen, n_commits, "
             "n_files, created_by) VALUES (?,?,?,?, 'named', 'active', ?, 'ledger', "
             "?,?,?,?,?, 'ledger')",
-            (name, notes.get(name, ""), notes.get(name, ""),
+            (name, definition, definition,
              tiers.get(name, "feature"), tiers.get(name), born[:10], born[:10], last[:10],
              ncom, len(files)))
         did = cur.lastrowid
@@ -638,6 +684,23 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
                 f"ON c.hash = cf.commit_hash WHERE cf.path IN ({','.join('?' * len(files))}) "
                 "AND c.is_merge = 0", tuple(sorted(files)))])
     out.commit()
+
+    # the concerns a rule carried away land where their files went
+    ids = {r[0]: r[1] for r in out.execute("SELECT name, id FROM domains")}
+    n_follow = 0
+    for dest, idxs in sorted(followed.items()):
+        did = ids.get(dest)
+        if did is None:
+            continue
+        out.executemany("UPDATE concerns SET domain_id=? WHERE id=?",
+                        [(did, work[i]["id"]) for i in idxs])
+        out.executemany(
+            "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, source) "
+            "VALUES (?,?,1.0,'ledger')", [(work[i]["commit"], did) for i in idxs])
+        n_follow += len(idxs)
+    out.commit()
+    if n_follow:
+        log(f"  {n_follow} concerns followed their files to the entry a rule moved them to")
 
     residue = sum(1 for cl in res["clusters"]
                   if cl["concerns"] < _MIN_CONCERNS or cl["commits"] < _MIN_COMMITS)
