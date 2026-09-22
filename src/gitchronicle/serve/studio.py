@@ -20,14 +20,16 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import re
+import subprocess
+import threading
 from collections import Counter, defaultdict
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ..taxonomy.ledger import PLAN_FILE, Ledger, LedgerError
 
-_SAMPLE = 40           # territory files sent per entry; the count is always exact
 _MIN_TREE_FILES = 6    # a directory smaller than this cannot be meaningfully fragmented
 
 # Directory names that describe a ROLE rather than a thing. Everything lives in one of
@@ -45,8 +47,8 @@ _STRUCTURAL = {
 
 def _catalogue(conn) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, name, definition, tier, tier_from, classification, lifecycle, "
-        "n_commits, born_at, last_seen FROM domains ORDER BY name").fetchall()
+        "SELECT id, name, definition, summary, tier, tier_from, classification, lifecycle, "
+        "n_commits, born_at, last_seen, created_by FROM domains ORDER BY name").fetchall()
     terr: dict[int, list] = defaultdict(list)
     for r in conn.execute("SELECT domain_id, path FROM domain_files ORDER BY path"):
         terr[r["domain_id"]].append(r["path"])
@@ -57,13 +59,21 @@ def _catalogue(conn) -> list[dict]:
     for r in rows:
         files = terr.get(r["id"], [])
         out.append({
-            "name": r["name"], "tier": r["tier"] or "feature",
+            # inherited upkeep is not a thing anyone built; it gets its own tier rather
+            # than posing as content
+            "name": r["name"],
+            "tier": "inherited" if r["classification"] == "inherited" else r["tier"] or "feature",
             "tier_from": r["tier_from"] or "auto",
+            # an entry only the rules create is renamed by editing them; one the pipeline
+            # proposes is renamed by a merge, because its name comes back every rebuild
+            "declared": r["created_by"] == "ledger",
             "definition": (r["definition"] or "")[:300],
+            "summary": (r["summary"] or "")[:600],
             "classification": r["classification"], "lifecycle": r["lifecycle"],
             "commits": r["n_commits"] or 0, "fan_in": fan[r["id"]],
             "born": (r["born_at"] or "")[:10], "last": (r["last_seen"] or "")[:10],
-            "files": files[:_SAMPLE], "n_files": len(files),
+            # the whole territory: decomposing an entry means seeing every file of it
+            "files": files, "n_files": len(files),
         })
     return out
 
@@ -208,11 +218,12 @@ def _lint(led: Ledger, catalogue: dict, plan_text: str = "") -> list[str]:
 
     # Duplicates are invisible after parsing, because repeated blocks are merged by
     # design — so this reads the raw text, which is the only place they still exist.
-    from collections import Counter as _C
-    for n, k in _C(re.findall(r'^entry\s+"([^"]*)"', plan_text, re.M)).items():
-        if k > 1:
-            warn.append(f"“{n}” is declared {k} times — the blocks combine into ONE entry. "
-                        f"Delete one if you meant them to be separate.")
+    dups = sorted(n for n, k in Counter(re.findall(r'^entry\s+"([^"]*)"', plan_text, re.M)).items()
+                  if k > 1)
+    if dups:
+        warn.append(f"{len(dups)} entries are declared in several blocks, which combine into one "
+                    f"({', '.join(dups[:4])}{'…' if len(dups) > 4 else ''}). Rules › Tidy folds them "
+                    f"together; delete a block instead if you meant separate entries.")
 
     for e in led.entries:
         if e.claims and not any(any(fnmatch.fnmatch(f, g) for g in e.claims)
@@ -232,23 +243,73 @@ def _edges(conn) -> list[dict]:
 
 
 def _story(conn, name: str) -> dict:
-    """One entry's narrated evolution, newest arc last."""
+    """One entry's narrated evolution, oldest first, with the commits behind each chapter."""
     row = conn.execute("SELECT id, name, summary, definition, tier, born_at, last_seen, "
-                       "n_commits FROM domains WHERE name = ?", (name,)).fetchone()
+                       "n_commits, lifecycle FROM domains WHERE name = ?", (name,)).fetchone()
     if not row:
         return {"error": f"no entry named {name!r}"}
-    chapters = [{
-        "title": c["title"] or "", "narrative": c["narrative"] or "",
-        "start": (c["period_start"] or "")[:10], "end": (c["period_end"] or "")[:10],
-        "commits": json.loads(c["commit_hashes"] or "[]"),
-    } for c in conn.execute(
-        "SELECT title, narrative, period_start, period_end, commit_hashes "
-        "FROM evolution_chapters WHERE target_type='domain' AND target_id=? "
-        "ORDER BY period_start", (row["id"],))]
+    chapters = []
+    for c in conn.execute(
+            "SELECT title, narrative, period_start, period_end, commit_hashes "
+            "FROM evolution_chapters WHERE target_type='domain' AND target_id=? "
+            "ORDER BY period_start", (str(row["id"]),)):
+        commits = []
+        for h in json.loads(c["commit_hashes"] or "[]")[:40]:
+            r = conn.execute("SELECT hash, subject, authored_at, author_name FROM commits "
+                             "WHERE hash >= ? AND hash < ? LIMIT 1", (h, h + "g")).fetchone()
+            if r:
+                commits.append({"hash": r["hash"][:10], "subject": r["subject"] or "",
+                                "date": (r["authored_at"] or "")[:10],
+                                "author": r["author_name"] or ""})
+        chapters.append({"title": c["title"] or "", "narrative": c["narrative"] or "",
+                         "start": (c["period_start"] or "")[:10],
+                         "end": (c["period_end"] or "")[:10],
+                         "n": len(json.loads(c["commit_hashes"] or "[]")),
+                         "commits": commits})
+    authors = [{"name": r[0], "n": r[1]} for r in conn.execute(
+        "SELECT c.author_name, COUNT(*) FROM commit_domains cd JOIN commits c "
+        "ON c.hash = cd.commit_hash WHERE cd.domain_id=? AND c.is_merge=0 "
+        "GROUP BY c.author_name ORDER BY 2 DESC LIMIT 5", (row["id"],)) if r[0]]
     return {"name": row["name"], "tier": row["tier"], "summary": row["summary"] or "",
             "definition": row["definition"] or "", "born": (row["born_at"] or "")[:10],
             "last": (row["last_seen"] or "")[:10], "commits": row["n_commits"] or 0,
-            "chapters": chapters}
+            "lifecycle": row["lifecycle"], "authors": authors, "chapters": chapters}
+
+
+def _timeline(conn) -> dict:
+    """Monthly commit counts per entry and for the whole project, plus chapter spans.
+
+    Months are indexed from the project's first commit so the payload stays small: 194
+    entries of sparse [month, count] pairs rather than a date string per cell.
+    """
+    first = conn.execute("SELECT MIN(authored_at), MAX(authored_at) FROM commits "
+                         "WHERE is_merge=0 AND authored_at IS NOT NULL").fetchone()
+    if not first or not first[0]:
+        return {"start": None, "months": 0, "pulse": [], "entries": {}}
+    y0, m0 = int(first[0][:4]), int(first[0][5:7])
+    y1, m1 = int(first[1][:4]), int(first[1][5:7])
+
+    def idx(d: str) -> int:
+        return (int(d[:4]) - y0) * 12 + int(d[5:7]) - m0
+
+    pulse = [0] * ((y1 - y0) * 12 + m1 - m0 + 1)
+    for r in conn.execute("SELECT substr(authored_at,1,7) m, COUNT(*) FROM commits "
+                          "WHERE is_merge=0 AND authored_at IS NOT NULL GROUP BY m"):
+        pulse[idx(r[0])] = r[1]
+    ents: dict[str, dict] = defaultdict(lambda: {"act": [], "arcs": []})
+    for r in conn.execute(
+            "SELECT d.name, substr(c.authored_at,1,7) m, COUNT(*) n FROM commit_domains cd "
+            "JOIN commits c ON c.hash = cd.commit_hash JOIN domains d ON d.id = cd.domain_id "
+            "WHERE c.is_merge=0 AND c.authored_at IS NOT NULL GROUP BY d.id, m"):
+        ents[r[0]]["act"].append([idx(r[1]), r[2]])
+    for r in conn.execute(
+            "SELECT d.name, e.title, e.period_start, e.period_end FROM evolution_chapters e "
+            "JOIN domains d ON d.id = CAST(e.target_id AS INTEGER) "
+            "WHERE e.target_type='domain' ORDER BY e.period_start"):
+        if r[2] and r[3]:
+            ents[r[0]]["arcs"].append([idx(r[2][:7]), idx(r[3][:7]), r[1] or ""])
+    return {"start": f"{y0:04d}-{m0:02d}", "months": len(pulse), "pulse": pulse,
+            "entries": ents}
 
 
 def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None = None) -> dict:
@@ -262,6 +323,8 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
     return {
         "catalogue": _catalogue(conn),
         "edges": _edges(conn),
+        "timeline": _timeline(conn),
+        "commits": conn.execute("SELECT COUNT(*) FROM commits WHERE is_merge=0").fetchone()[0],
         "chapters": conn.execute(
             "SELECT COUNT(*) FROM evolution_chapters").fetchone()[0],
         "trees": _fragmentation(conn, led),
@@ -270,8 +333,48 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
     }
 
 
+class _Rebuild:
+    """`gitchronicle update` run from the studio, one at a time, with its log kept.
+
+    Curation is a loop — write a rule, rebuild, look — and a loop that makes you switch
+    to a terminal for the middle step gets run less. The rebuild is the ordinary CLI in a
+    subprocess, so there is one code path and a crash cannot take the studio down.
+    """
+
+    def __init__(self, argv: list[str]):
+        self.argv = argv
+        self.proc = None
+        self.lines: list[str] = []
+        self.code: int | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> bool:
+        with self._lock:
+            if self.proc is not None and self.proc.poll() is None:
+                return False
+            self.lines, self.code = [], None
+            self.proc = subprocess.Popen(
+                self.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "COLUMNS": "200", "NO_COLOR": "1"})
+        threading.Thread(target=self._pump, daemon=True).start()
+        return True
+
+    def _pump(self):
+        for line in self.proc.stdout:
+            self.lines.append(line.rstrip())
+        self.code = self.proc.wait()
+
+    def status(self) -> dict:
+        running = self.proc is not None and self.proc.poll() is None
+        stage = next((ln.strip("▸ ").strip() for ln in reversed(self.lines)
+                      if ln.startswith("▸")), "")
+        return {"running": running, "code": self.code, "stage": stage,
+                "tail": self.lines[-14:]}
+
+
 def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: int = 8765,
-                 log=print) -> None:
+                 log=print, provider_factory=None, rebuild_argv: list[str] | None = None,
+                 title: str = "") -> None:
     """Open the knowledge base per request rather than holding it.
 
     `update` swaps the database atomically, so a long-lived connection keeps reading the
@@ -279,13 +382,25 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
     loop that goes curate, update, look again, that is the one thing it must not do.
     Opening is microseconds against a local file.
     """
+    from urllib.parse import parse_qs, urlparse
+
     from ..storage import connect as db_connect
+    from .search import Index, ask
 
     plan = Path(plan_path)
     db = str(db_path)
+    index = Index(db)
+    rebuild = _Rebuild(rebuild_argv) if rebuild_argv else None
+    provider_box: dict = {}
+    ask_lock = threading.Lock()
 
     def fresh():
         return db_connect(db)
+
+    def provider():
+        if "p" not in provider_box:
+            provider_box["p"] = provider_factory() if provider_factory else None
+        return provider_box["p"]
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):        # the server's own chatter is not the user's news
@@ -295,6 +410,7 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
@@ -302,22 +418,40 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
             self._send(json.dumps(obj).encode(), "application/json; charset=utf-8", code)
 
         def do_GET(self):
-            if self.path == "/":
-                self._send(page(), "text/html; charset=utf-8")
-            elif self.path.startswith("/api/story"):
-                from urllib.parse import parse_qs, urlparse
-                q = parse_qs(urlparse(self.path).query)
+            u = urlparse(self.path)
+            q = parse_qs(u.query)
+            if u.path == "/":
+                # the state rides along with the page, so the first paint needs no round trip
+                c = fresh()
+                try:
+                    st = build_state(c, plan)
+                finally:
+                    c.close()
+                st.update(project=title, can_ask=provider_factory is not None,
+                          can_rebuild=rebuild is not None)
+                boot = ("<script>window.__STATE__=" + json.dumps(st).replace("</", "<\\/")
+                        + "</script>").encode()
+                self._send(page().replace(b"<!--BOOT-->", boot), "text/html; charset=utf-8")
+            elif u.path == "/api/story":
                 c = fresh()
                 try:
                     self._json(_story(c, (q.get("entry") or [""])[0]))
                 finally:
                     c.close()
-            elif self.path == "/api/state":
+            elif u.path == "/api/state":
                 c = fresh()
                 try:
-                    self._json(build_state(c, plan))
+                    st = build_state(c, plan)
                 finally:
                     c.close()
+                st["project"] = title
+                st["can_ask"] = provider_factory is not None
+                st["can_rebuild"] = rebuild is not None
+                self._json(st)
+            elif u.path == "/api/search":
+                self._json(index.search((q.get("q") or [""])[0]))
+            elif u.path == "/api/rebuild":
+                self._json(rebuild.status() if rebuild else {"running": False})
             else:
                 self._send(b"not found", "text/plain", 404)
 
@@ -344,18 +478,34 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 plan.write_text(text, encoding="utf-8")
                 log(f"  saved {plan}")
                 self._json({"saved": str(plan)})
+            elif self.path == "/api/ask":
+                question = (body.get("q") or "").strip()
+                try:
+                    prov = provider()
+                    if prov is None:
+                        raise RuntimeError("no chat provider configured")
+                    with ask_lock:                     # one paid call at a time
+                        self._json(ask(index, db, prov, question))
+                except Exception as exc:  # noqa: BLE001 - the page shows it, the server lives
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            elif self.path == "/api/rebuild":
+                if rebuild is None:
+                    self._json({"error": "rebuild not available"}, 400)
+                else:
+                    self._json({"started": rebuild.start(), **rebuild.status()})
             else:
                 self._send(b"not found", "text/plain", 404)
 
     try:
-        srv = HTTPServer(("127.0.0.1", port), Handler)
+        # threaded: an LLM answer takes seconds, and the page must keep responding meanwhile
+        srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     except OSError as exc:
         # almost always an earlier studio still running — and one serving older code,
         # which is worse than no studio at all, so say what to do about it
         raise SystemExit(
             f"  port {port} is already in use — another studio is probably still running.\n"
             f"  Stop it with Ctrl-C in its terminal, or start this one elsewhere:\n"
-            f"      gitchronicle studio --db <kb.db> --port {port + 1}\n"
+            f"      gitchronicle studio --port {port + 1}\n"
             f"  ({exc})") from exc
     log(f"  studio on http://127.0.0.1:{port}   (editing {plan}; Ctrl-C to stop)")
     try:

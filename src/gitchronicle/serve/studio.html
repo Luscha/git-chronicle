@@ -2,705 +2,1667 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gitchronicle studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
   --t-foundation:#2a78d6; --t-framework:#eb6834; --t-feature:#1baf7a;
-  --t-tooling:#eda100;    --t-content:#e87ba4;
-  --bg:#fff; --fg:#1a1d21; --muted:#69707a; --line:#e3e6ea; --side:#f6f7f9;
-        --acc:#2860c4; --chip:#eef2f9; --warn:#b4530a; --ok:#1e7a45; --card:#fff; }
+  --t-tooling:#eda100;    --t-content:#e87ba4; --t-inherited:#a3a7b0;
+  --bg:#f6f6f7; --panel:#ffffff; --panel-2:#fafafb; --sunken:#f1f1f3;
+  --fg:#16171b; --fg-2:#3b3e46; --muted:#6c707b; --faint:#9da1ab;
+  --line:#e6e6ea; --line-2:#eeeef1;
+  --acc:#5b5bd6; --acc-soft:#efeffd; --acc-line:#c9c9f4;
+  --btn:#16171b; --btn-fg:#ffffff;
+  --warn:#b45309; --warn-soft:#fdf3e4; --ok:#15803d; --ok-soft:#e9f6ee; --bad:#b91c1c; --bad-soft:#fdecec;
+  --mark:#fff1b8;
+  --shadow-s:0 1px 2px rgba(15,16,20,.05);
+  --shadow:0 1px 2px rgba(15,16,20,.04), 0 6px 24px rgba(15,16,20,.07);
+  --shadow-l:0 8px 40px rgba(15,16,20,.16);
+  --r:10px;
+  --sans:"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
 @media (prefers-color-scheme: dark) {
   :root {
-    --t-foundation:#3987e5; --t-framework:#d95926; --t-feature:#199e70;
-    --t-tooling:#c98500;    --t-content:#d55181;
-    --bg:#14161a; --fg:#e6e8eb; --muted:#96a0ab; --line:#2a2f36; --side:#191c21;
-          --acc:#7aa5f0; --chip:#20293a; --warn:#e2933f; --ok:#5fc98c; --card:#181b20; }
+    --t-foundation:#4b93ea; --t-framework:#e8723f; --t-feature:#27b583;
+    --t-tooling:#d99a12;    --t-content:#df6b95; --t-inherited:#6b6f78;
+    --bg:#0d0e11; --panel:#15161a; --panel-2:#18191e; --sunken:#1c1d22;
+    --fg:#ededf0; --fg-2:#c7c9cf; --muted:#8e929c; --faint:#62666f;
+    --line:#26282e; --line-2:#1f2126;
+    --acc:#8e8cf5; --acc-soft:#22223d; --acc-line:#3c3b73;
+    --btn:#ededf0; --btn-fg:#111215;
+    --warn:#e6a24a; --warn-soft:#2e2413; --ok:#5fcb8a; --ok-soft:#14261b; --bad:#f07575; --bad-soft:#2d1616;
+    --mark:#4a3f10;
+    --shadow-s:0 1px 2px rgba(0,0,0,.3);
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 24px rgba(0,0,0,.35);
+    --shadow-l:0 8px 40px rgba(0,0,0,.55);
+  }
 }
-* { box-sizing:border-box; margin:0 }
-body { background:var(--bg); color:var(--fg); font:14px/1.55 system-ui,-apple-system,sans-serif }
-header { display:flex; align-items:center; gap:14px; padding:10px 20px; border-bottom:1px solid var(--line) }
-header h1 { font-size:15px }
-nav { margin-left:auto; display:flex; gap:6px }
-nav button { background:none; border:1px solid var(--line); color:var(--fg); border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-nav button.on { background:var(--acc); border-color:var(--acc); color:#fff }
-#how { background:var(--side); border-bottom:1px solid var(--line); padding:9px 20px;
-  font-size:13px; color:var(--muted) }
-#how b { color:var(--fg); font-weight:600 }
-main { padding:18px 20px 90px; max-width:980px }
-h2 { font-size:17px; margin-bottom:4px }
-.sub { color:var(--muted); font-size:13px; max-width:80ch }
-.card { border:1px solid var(--line); background:var(--card); border-radius:10px;
-  padding:14px 16px; margin:12px 0 }
-.card.done { opacity:.45 }
-.card h3 { font-size:14px; font-family:ui-monospace,Menlo,monospace; margin-bottom:3px }
-.facts { color:var(--muted); font-size:12.5px; margin-bottom:9px }
-.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted) }
-.cols { display:flex; gap:26px; flex-wrap:wrap; margin:8px 0 12px }
-.cols > div { min-width:220px } .cols h4 { font-size:11.5px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--muted); margin-bottom:4px; font-weight:500 }
+* { box-sizing:border-box; margin:0; padding:0 }
+html,body { height:100% }
+body { background:var(--bg); color:var(--fg); font:14px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased; font-feature-settings:"cv11","ss01" }
+button, input, select, textarea { font:inherit; color:inherit }
+a { color:var(--acc); text-decoration:none; cursor:pointer }
+mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px }
+.mono { font-family:var(--mono); font-size:12px }
+.muted { color:var(--muted) } .faint { color:var(--faint) }
+.num { font-variant-numeric:tabular-nums }
+
+/* ---------- shell ---------- */
+#app { display:grid; grid-template-columns:232px 1fr; height:100vh }
+#side { background:var(--panel); border-right:1px solid var(--line); display:flex;
+  flex-direction:column; padding:18px 12px 14px; gap:6px; overflow:auto }
+.brand { display:flex; align-items:center; gap:10px; padding:2px 8px 14px }
+.brand .logo { width:28px; height:28px; border-radius:8px; display:grid; place-items:center;
+  background:linear-gradient(135deg,var(--t-foundation),var(--acc)); color:#fff }
+.brand b { font-weight:650; letter-spacing:-.01em; display:block; font-size:14.5px }
+.brand span { color:var(--muted); font-size:12px; display:block; margin-top:-2px }
+.navh { font-size:11px; font-weight:600; color:var(--faint); text-transform:uppercase;
+  letter-spacing:.07em; padding:14px 10px 6px }
+.navi { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px;
+  color:var(--fg-2); cursor:pointer; font-weight:500; user-select:none }
+.navi:hover { background:var(--sunken); color:var(--fg) }
+.navi.on { background:var(--acc-soft); color:var(--acc) }
+.navi svg { width:17px; height:17px; flex:none; opacity:.85 }
+.navi .count { margin-left:auto; font-size:11.5px; color:var(--muted); font-weight:500 }
+.navi .count.hot { background:var(--warn-soft); color:var(--warn); padding:0 7px; border-radius:99px }
+.sidefoot { margin-top:auto; border-top:1px solid var(--line); padding:14px 8px 0;
+  font-size:12px; color:var(--muted); display:grid; gap:4px }
+.sidefoot b { color:var(--fg-2); font-weight:600 }
+#main { overflow:auto; position:relative }
+.page { max-width:1180px; margin:0 auto; padding:34px 40px 120px }
+.page.wide { max-width:none; padding:0; height:100% }
+.ph { display:flex; align-items:flex-end; gap:16px; margin-bottom:22px; flex-wrap:wrap }
+.ph h1 { font-size:22px; font-weight:650; letter-spacing:-.02em }
+.ph p { color:var(--muted); max-width:72ch; margin-top:4px }
+.ph .grow { flex:1; min-width:260px }
+
+/* ---------- controls ---------- */
+.btn { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line);
+  background:var(--panel); border-radius:8px; padding:6px 12px; cursor:pointer;
+  font-weight:500; font-size:13px; color:var(--fg-2); white-space:nowrap; box-shadow:var(--shadow-s) }
+.btn:hover { border-color:var(--faint); color:var(--fg) }
+.btn.pri { background:var(--btn); color:var(--btn-fg); border-color:var(--btn) }
+.btn.pri:hover { opacity:.9 }
+.btn.ghost { background:none; box-shadow:none; border-color:transparent; color:var(--muted) }
+.btn.ghost:hover { background:var(--sunken); color:var(--fg) }
+.btn.bad { color:var(--bad) } .btn.bad:hover { border-color:var(--bad) }
+.btn:disabled { opacity:.45; cursor:default }
+.btn svg { width:15px; height:15px }
+.field { border:1px solid var(--line); background:var(--panel); border-radius:8px;
+  padding:7px 11px; font-size:13.5px; outline:none; min-width:0 }
+.field:focus { border-color:var(--acc); box-shadow:0 0 0 3px var(--acc-soft) }
+.search { position:relative; display:flex; align-items:center }
+.search svg { position:absolute; left:10px; width:15px; height:15px; color:var(--faint); pointer-events:none }
+.search .field { padding-left:32px; width:100% }
+.seg { display:inline-flex; background:var(--sunken); border-radius:9px; padding:3px; gap:2px; flex-wrap:wrap }
+.seg button { border:0; background:none; padding:5px 11px; border-radius:7px; cursor:pointer;
+  font-size:12.5px; font-weight:500; color:var(--muted); display:inline-flex; align-items:center; gap:6px }
+.seg button:hover { color:var(--fg) }
+.seg button.on { background:var(--panel); color:var(--fg); box-shadow:var(--shadow-s) }
+.seg button small { color:var(--faint); font-weight:500 }
+.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; flex:none }
+.pill { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:550;
+  padding:2px 9px 2px 8px; border-radius:99px; background:var(--sunken); color:var(--fg-2); white-space:nowrap }
+.tag { font-size:11px; padding:1px 7px; border-radius:5px; background:var(--sunken); color:var(--muted); font-weight:500 }
+.tag.bad { background:var(--bad-soft); color:var(--bad) }
+.tag.warn { background:var(--warn-soft); color:var(--warn) }
+.tag.ok { background:var(--ok-soft); color:var(--ok) }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow-s) }
+.card.pad { padding:18px 20px }
+.hint { font-size:12.5px; color:var(--muted); margin-top:6px }
+.hint.ok { color:var(--ok) } .hint.err { color:var(--warn) }
+.empty { color:var(--muted); padding:28px; text-align:center }
+.kbd { font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-bottom-width:2px;
+  border-radius:4px; padding:0 5px; color:var(--muted) }
+
+/* ---------- ask ---------- */
+.hero { max-width:820px; margin:6vh auto 0; text-align:center }
+.hero h1 { font-size:32px; font-weight:700; letter-spacing:-.03em }
+.hero .sub { color:var(--muted); margin-top:8px; font-size:14.5px }
+.askbox { margin:26px auto 0; display:flex; gap:8px; background:var(--panel); border:1px solid var(--line);
+  border-radius:14px; padding:7px 7px 7px 16px; box-shadow:var(--shadow); align-items:center }
+.askbox:focus-within { border-color:var(--acc); box-shadow:0 0 0 4px var(--acc-soft), var(--shadow) }
+.askbox svg { width:18px; height:18px; color:var(--faint); flex:none }
+.askbox input { flex:1; border:0; outline:0; background:none; font-size:16px; padding:8px 4px; min-width:0 }
+.chips { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:16px }
+.chip { border:1px solid var(--line); background:var(--panel); border-radius:99px; padding:6px 13px;
+  font-size:13px; color:var(--fg-2); cursor:pointer }
+.chip:hover { border-color:var(--acc-line); color:var(--acc) }
+.answer { max-width:820px; margin:26px auto 0; padding:22px 26px; text-align:left }
+.answer .lbl { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:600;
+  color:var(--acc); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px }
+.md p { margin:0 0 10px; line-height:1.65 } .md p:last-child { margin:0 }
+.md ul, .md ol { margin:0 0 10px 20px; line-height:1.6 } .md li { margin:3px 0 }
+.md code { font-family:var(--mono); font-size:12px; background:var(--sunken); padding:1px 5px; border-radius:4px }
+.ref { color:var(--acc); background:var(--acc-soft); border-radius:5px; padding:0 5px; cursor:pointer; font-weight:500 }
+.ref:hover { text-decoration:underline }
+.sources { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); display:flex;
+  gap:6px; flex-wrap:wrap; align-items:center; font-size:12px; color:var(--muted) }
+.skel { height:12px; border-radius:6px; background:linear-gradient(90deg,var(--sunken),var(--line),var(--sunken));
+  background-size:200% 100%; animation:sh 1.2s infinite; margin:10px 0 }
+@keyframes sh { to { background-position:-200% 0 } }
+.results { display:grid; grid-template-columns:1fr 1.3fr 1fr; gap:18px; max-width:1180px; margin:30px auto 0; text-align:left }
+.rcol h3 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint);
+  font-weight:600; margin:0 0 8px 2px }
+.hit { padding:10px 12px; border-radius:9px; cursor:pointer; border:1px solid transparent }
+.hit:hover { background:var(--panel); border-color:var(--line); box-shadow:var(--shadow-s) }
+.hit b { font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:7px }
+.hit .s { color:var(--muted); font-size:12.5px; margin-top:2px; line-height:1.45;
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden }
+.hit .d { color:var(--faint); font-size:11.5px }
+
+/* ---------- catalogue ---------- */
+table.list { width:100%; border-collapse:separate; border-spacing:0 }
+table.list th { text-align:left; font-size:11.5px; font-weight:600; color:var(--faint); padding:8px 12px;
+  text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--line); position:sticky; top:0;
+  background:var(--bg); z-index:1; cursor:pointer; user-select:none; white-space:nowrap }
+table.list th.r, table.list td.r { text-align:right }
+table.list td { padding:10px 12px; border-bottom:1px solid var(--line-2); vertical-align:middle }
+table.list tr.row { cursor:pointer }
+table.list tr.row:hover td { background:var(--panel) }
+table.list tr.row.sel td { background:var(--acc-soft) }
+.ename { font-weight:600; display:flex; align-items:center; gap:8px }
+.edef { color:var(--muted); font-size:12.5px; margin-top:2px; max-width:62ch;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+
+/* ---------- graph ---------- */
+#gwrap { position:absolute; inset:0; overflow:hidden; background:
+  radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0/22px 22px; }
+#gwrap > svg { width:100%; height:100%; display:block; cursor:grab }
+#gwrap > svg.panning { cursor:grabbing }
+.gpanel { position:absolute; left:18px; top:18px; width:290px; padding:16px; display:grid; gap:12px; z-index:2 }
+.gpanel h1 { font-size:17px; font-weight:650; letter-spacing:-.01em }
+.legend { display:grid; gap:3px }
+.legend button { display:flex; align-items:center; gap:9px; border:0; background:none; cursor:pointer;
+  padding:4px 6px; border-radius:6px; font-size:13px; color:var(--fg-2); text-align:left }
+.legend button:hover { background:var(--sunken) }
+.legend button.off { opacity:.35 }
+.legend button small { margin-left:auto; color:var(--faint) }
+.ghelp { position:absolute; left:18px; bottom:16px; font-size:12px; color:var(--muted); z-index:2 }
+.gzoom { position:absolute; right:18px; bottom:16px; display:flex; gap:6px; z-index:2 }
+.node circle { stroke:var(--panel); stroke-width:2; transition:opacity .15s }
+.node text { font-weight:550; fill:var(--fg); paint-order:stroke; stroke:var(--bg);
+  stroke-width:3.5px; stroke-linejoin:round; pointer-events:none; transition:opacity .15s }
+.edge { stroke:var(--faint); stroke-opacity:.45; fill:none; transition:opacity .15s }
+svg.focus .node:not(.hot) { opacity:.13 }
+svg.focus .edge:not(.hot) { opacity:.06 }
+svg.focus .edge.hot { stroke:var(--acc); stroke-opacity:.9 }
+.node.sel circle { stroke:var(--fg); stroke-width:2.5 }
+.tip { position:fixed; pointer-events:none; background:var(--panel); border:1px solid var(--line);
+  border-radius:8px; padding:8px 11px; font-size:12.5px; box-shadow:var(--shadow); z-index:50;
+  max-width:320px; display:none }
+.tip b { display:block; font-weight:600 }
+
+/* ---------- timeline ---------- */
+.pulse { padding:16px 18px 8px; margin-bottom:14px }
+.pulse h3, .yr h3 { font-size:13px; font-weight:600 }
+.lanes { padding:6px 0 10px; overflow:hidden }
+.lanes svg { display:block; width:100% }
+.lane:hover .lbg { fill:var(--sunken) }
+.lane { cursor:pointer }
+.lane text { font-size:12px; fill:var(--fg-2) }
+.axis text { font-size:11px; fill:var(--faint) }
+.yr { padding:18px 20px; margin-bottom:14px }
+.yr .cols { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; margin-top:12px }
+.yr h4 { font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600; margin-bottom:6px }
+.yr .it { padding:5px 0; font-size:13px; cursor:pointer; display:flex; gap:8px; align-items:baseline }
+.yr .it:hover b { color:var(--acc) }
+.yr .it b { font-weight:550 }
+.yr .it span { color:var(--muted); font-size:12px }
+
+/* ---------- drawer ---------- */
+#drawer { position:fixed; top:0; right:0; bottom:0; width:min(600px,100vw); background:var(--panel);
+  border-left:1px solid var(--line); box-shadow:var(--shadow-l); z-index:30; display:flex; flex-direction:column;
+  transform:translateX(102%); transition:transform .22s ease }
+#drawer.open { transform:none }
+.dh { padding:20px 24px 0; border-bottom:1px solid var(--line) }
+.dh .top { display:flex; align-items:center; gap:8px }
+.dh h2 { font-size:21px; font-weight:680; letter-spacing:-.02em; margin:10px 0 4px; line-height:1.25 }
+.dh .meta { color:var(--muted); font-size:12.5px; display:flex; flex-wrap:wrap; gap:4px 14px }
+.dh .meta b { color:var(--fg-2); font-weight:600 }
+.tabs { display:flex; gap:2px; margin-top:16px }
+.tabs button { border:0; background:none; padding:9px 12px; cursor:pointer; color:var(--muted); font-weight:550;
+  font-size:13px; border-bottom:2px solid transparent; margin-bottom:-1px }
+.tabs button:hover { color:var(--fg) }
+.tabs button.on { color:var(--fg); border-bottom-color:var(--fg) }
+.tabs small { color:var(--faint); font-weight:500; margin-left:3px }
+.db { flex:1; overflow:auto; padding:20px 24px 90px }
+.summary { color:var(--fg-2); line-height:1.65; margin-bottom:16px }
+.story { position:relative; margin-top:6px }
+.yearmark { font-size:12px; font-weight:700; color:var(--faint); margin:18px 0 8px; letter-spacing:.04em }
+.yearmark:first-child { margin-top:0 }
+.ch { position:relative; padding:0 0 18px 24px }
+.ch::before { content:""; position:absolute; left:5px; top:14px; bottom:-4px; width:2px; background:var(--line) }
+.ch:last-child::before { display:none }
+.ch .pt { position:absolute; left:0; top:5px; width:12px; height:12px; border-radius:50%;
+  background:var(--panel); border:2.5px solid var(--tc, var(--acc)) }
+.ch h4 { font-size:14px; font-weight:620; line-height:1.35 }
+.ch .when { font-size:12px; color:var(--muted); margin:2px 0 6px }
+.ch p { color:var(--fg-2); line-height:1.62; font-size:13.5px }
+.ch details { margin-top:6px }
+.ch summary { font-size:12px; color:var(--muted); cursor:pointer; list-style:none; display:inline-flex; gap:5px; align-items:center }
+.ch summary::-webkit-details-marker { display:none }
+.ch summary:hover { color:var(--fg) }
+.cm { display:grid; grid-template-columns:auto auto 1fr; gap:2px 10px; margin-top:6px; font-size:12px }
+.cm .h { font-family:var(--mono); color:var(--faint); font-size:11.5px }
+.cm .dt { color:var(--faint) }
+.cm .sj { color:var(--fg-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.authors { font-size:12.5px; color:var(--muted); margin-bottom:14px }
+.tree { font-size:13px; margin-top:12px }
+.tr { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:6px; min-height:30px }
+.tr:hover { background:var(--sunken) }
+.tr .tw { width:16px; text-align:center; color:var(--faint); cursor:pointer; flex:none; user-select:none }
+.tr .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); font-size:12px }
+.tr.dir .nm { font-weight:600; color:var(--fg-2); cursor:pointer }
+.tr .bar { height:5px; border-radius:3px; background:var(--tc); opacity:.55; flex:none }
+.tr .n { color:var(--muted); font-size:11.5px; margin-left:auto; flex:none; padding-left:8px }
+.tr .acts { display:none; gap:4px; flex:none }
+.tr:hover .acts, .tr.editing .acts { display:flex }
+.tr .acts .btn { padding:2px 8px; font-size:12px }
+.tr.gone .nm { text-decoration:line-through; color:var(--faint) }
+.pickbar { position:sticky; top:-20px; z-index:3; margin:14px -24px 0; padding:12px 24px; background:var(--panel);
+  border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px }
+.pickbar.idle { color:var(--faint); font-size:12.5px; padding:8px 24px }
+.tr .ck { flex:none; margin:0 2px; accent-color:var(--acc); cursor:pointer }
+.tr.picked { background:var(--acc-soft) }
+.explain { background:var(--sunken); border-radius:9px; padding:12px 14px; font-size:12.5px; color:var(--fg-2); line-height:1.55 }
+.explain b { font-weight:600 }
+.links { display:grid; grid-template-columns:1fr 1fr; gap:20px }
+.links h4 { font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600; margin-bottom:8px }
+.lk { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px }
+.lk:hover { background:var(--sunken) }
+.act { display:grid; gap:4px; padding:14px 0; border-bottom:1px solid var(--line-2) }
+.act h4 { font-size:13.5px; font-weight:600 }
+.act p { font-size:12.5px; color:var(--muted) }
+.act .row { display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center }
+
+/* ---------- review / rules ---------- */
+.rv { padding:18px 20px; margin-bottom:14px }
+.rv.done { opacity:.5 }
+.rv h3 { font-family:var(--mono); font-size:13.5px; font-weight:500 }
+.rv .facts { color:var(--muted); font-size:12.5px; margin:4px 0 12px; display:flex; gap:12px; flex-wrap:wrap }
+.rv .cols { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-bottom:14px }
+.rv h4 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600; margin-bottom:6px }
+.hold { display:grid; grid-template-columns:1fr 70px 28px; gap:8px; align-items:center; font-size:12.5px; padding:2px 0 }
+.hold .b { height:5px; border-radius:3px; background:var(--acc); opacity:.5 }
 .acts { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-button.p { background:var(--acc); border:1px solid var(--acc); color:#fff; border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-button.s { background:none; border:1px solid var(--line); color:var(--muted); border-radius:6px;
-  padding:5px 13px; cursor:pointer; font-size:13px }
-button.s:hover { color:var(--fg); border-color:var(--acc) }
-input,select { background:var(--bg); color:var(--fg); border:1px solid var(--line);
-  border-radius:6px; padding:5px 9px; font-size:13px; font-family:inherit }
-input { min-width:240px }
-table { border-collapse:collapse; width:100%; font-size:13px }
-th,td { text-align:left; padding:5px 9px; border-bottom:1px solid var(--line); vertical-align:top }
-th { color:var(--muted); font-weight:500; font-size:12px }
-td.num,th.num { text-align:right; font-variant-numeric:tabular-nums }
-.tier { display:inline-block; font-size:11px; padding:1px 8px; border-radius:99px;
-  background:var(--chip); color:var(--muted) }
-textarea { width:100%; height:40vh; background:var(--side); color:var(--fg); border:1px solid var(--line);
-  border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12.5px }
-#bar { position:fixed; left:0; right:0; bottom:0; background:var(--card);
-  border-top:1px solid var(--line); padding:10px 20px; display:flex; gap:12px; align-items:center }
-#bar .grow { flex:1; color:var(--muted); font-size:13px }
-.err { color:var(--warn) } .ok { color:var(--ok) }
-.band { margin:16px 0 6px; font-size:11.5px; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--muted); display:flex; align-items:center; gap:8px }
-.band i { width:9px; height:9px; border-radius:2px; display:inline-block }
-.nodes { display:flex; flex-wrap:wrap; gap:6px }
-.node { border:1px solid var(--line); border-radius:6px; padding:3px 9px; cursor:pointer;
-  font-size:12.5px; background:var(--bg); display:flex; align-items:center; gap:6px }
-.node i { width:8px; height:8px; border-radius:2px; flex:none }
-.node.dim { opacity:.25 } .node.sel { border-color:var(--fg); font-weight:600 }
-.node.up { border-color:var(--t-foundation) } .node.down { border-color:var(--t-framework) }
-.node small { color:var(--muted); font-variant-numeric:tabular-nums }
-.chap { border-left:2px solid var(--line); padding:2px 0 10px 14px; margin-left:5px }
-.chap b { font-size:13.5px } .chap .when { color:var(--muted); font-size:12px }
-.chap p { margin:4px 0; max-width:78ch }
-.hash { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:var(--muted) }
-details summary { cursor:pointer; color:var(--muted); font-size:12.5px }
+.rule { padding:12px 16px; display:flex; gap:14px; align-items:flex-start }
+.rule + .rule { border-top:1px solid var(--line-2) }
+.rule .body { flex:1; min-width:0 }
+.rule .body b { font-weight:600 }
+.rule .lines { font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:4px; display:grid; gap:1px }
+.rule .kind { width:92px; flex:none; padding-top:2px }
+.rgroup { margin:22px 0 8px; font-size:12px; font-weight:600; color:var(--faint); text-transform:uppercase; letter-spacing:.07em }
+textarea.plan { width:100%; min-height:46vh; background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:14px 16px; font-family:var(--mono); font-size:12.5px; line-height:1.6; outline:none; resize:vertical }
+textarea.plan:focus { border-color:var(--acc) }
+
+/* ---------- dock ---------- */
+#dock { position:fixed; left:calc((100vw + 232px) / 2); transform:translateX(-50%); bottom:20px; z-index:40; white-space:nowrap;
+  background:var(--btn); color:var(--btn-fg); border-radius:12px; padding:8px 8px 8px 16px; display:none;
+  align-items:center; gap:12px; box-shadow:var(--shadow-l); font-size:13px; max-width:calc(100vw - 280px) }
+#dock.show { display:flex }
+#dock .btn { background:transparent; color:inherit; border-color:rgba(127,127,127,.35); box-shadow:none }
+#dock .btn.pri { background:var(--btn-fg); color:var(--btn); border-color:var(--btn-fg) }
+#dock .spin { width:14px; height:14px; border:2px solid rgba(127,127,127,.4); border-top-color:currentColor;
+  border-radius:50%; animation:rot .8s linear infinite }
+@keyframes rot { to { transform:rotate(360deg) } }
+body.dopen #dock, body.dopen #pvpop { left:calc((100vw - min(600px,100vw) + 232px) / 2) }
+#pvpop { position:fixed; bottom:78px; left:calc((100vw + 232px) / 2); transform:translateX(-50%); width:min(620px,90vw);
+  max-height:60vh; overflow:auto; z-index:41; padding:18px 20px; display:none }
+#pvpop.show { display:block }
+#pvpop table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px }
+#pvpop td { padding:5px 4px; border-bottom:1px solid var(--line-2) }
+#err { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:60; background:var(--bad-soft);
+  color:var(--bad); border:1px solid var(--bad); border-radius:9px; padding:9px 14px; font-size:13px; display:none; max-width:80vw }
+@media (max-width: 900px) {
+  body.dopen #dock, body.dopen #pvpop { left:50% }
+  #app { grid-template-columns:1fr } #side { display:none }
+  .page { padding:22px 16px 110px } .results { grid-template-columns:1fr }
+  #dock, #pvpop { left:50%; transform:translateX(-50%) }
+  .rv .cols, .yr .cols, .links { grid-template-columns:1fr }
+}
 </style></head><body>
-<header><h1>gitchronicle studio</h1>
-<nav><button id="bR" class="on">Review</button><button id="bC">Catalogue</button>
-<button id="bG">Map</button><button id="bS">Story</button><button id="bL">Rules</button></nav></header>
-<div id="how"></div>
+<div id="app">
+  <aside id="side">
+    <div class="brand"><div class="logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 7.2 15.7 11M8.3 16.8l7.4-3.8"/></svg></div>
+      <div><b>gitchronicle</b><span id="proj">studio</span></div></div>
+    <div class="navh">Explore</div>
+    <div class="navi" data-v="ask"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Ask</div>
+    <div class="navi" data-v="catalogue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Catalogue<span class="count" id="nCat"></span></div>
+    <div class="navi" data-v="graph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>Graph</div>
+    <div class="navi" data-v="timeline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h9M7 12h12M5 18h8"/></svg>Timeline</div>
+    <div class="navh">Curate</div>
+    <div class="navi" data-v="review"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Review<span class="count" id="nRev"></span></div>
+    <div class="navi" data-v="rules"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>Rules<span class="count" id="nRul"></span></div>
+    <div class="sidefoot" id="foot"></div>
+  </aside>
+  <main id="main"><div class="page"><div class="empty">Loading the knowledge base…</div></div></main>
+</div>
+<section id="drawer" aria-label="Entry"></section>
+<div id="dock"></div>
+<div id="pvpop" class="card"></div>
+<div class="tip" id="tip"></div>
+<div id="err"></div>
 <datalist id="entrynames"></datalist>
-<main id="main">loading…</main>
-<div id="bar"><span class="grow" id="status"></span>
-  <button class="s" id="bPrev">Preview changes</button>
-  <button class="p" id="bSave">Save rules</button></div>
+<!--BOOT-->
 <script>
 "use strict";
-let S = null, view = "review", planText = "", dirty = 0, skipped = new Set();
-const $ = id => document.getElementById(id);
-const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c;
-  if (x !== undefined) e.textContent = x; return e; };
+// Errors surface on the page: a studio that silently stops rendering looks exactly like
+// one with nothing to show.
+window.addEventListener("error", e => showErr(e.message + (e.lineno ? " (line " + e.lineno + ")" : "")));
+window.addEventListener("unhandledrejection", e => showErr(String(e.reason && e.reason.message || e.reason)));
+function showErr(msg) { const b = document.getElementById("err"); b.textContent = "Something broke: " + msg; b.style.display = "block"; }
 
-const HOW = {
-  review: "<b>Step 1 of 3 — Review.</b> Each card is one directory the catalogue split "
-    + "across several entries. Look at the filenames: if they are all parts of <b>one "
-    + "thing you built</b>, make it one entry. If they are genuinely different features "
-    + "that happen to share a folder, skip it — being split is correct there.",
-  catalogue: "<b>Everything the tool found.</b> Grouped by tier. <b>set by</b> tells you "
-    + "whether you decided a tier or the tool guessed. Change any guess you disagree with.",
-  map: "<b>What is built on what.</b> Tiers are layers: foundations at the bottom, the "
-    + "things that use them above. Click an entry to light up what it uses and what uses "
-    + "it. Only entries with import edges appear — the rest stand alone.",
-  story: "<b>How it came to be.</b> Chapters break where the work genuinely stopped, and a "
-    + "long run of upkeep is one chapter rather than one per month. Run "
-    + "<b>gitchronicle update --chronicle</b> to narrate them.",
-  rules: "<b>Step 2 and 3 — Preview, then Save.</b> These rules are replayed on every run, "
-    + "so they survive new commits. Preview shows exactly which files move before anything "
-    + "is written. After saving, run <b>gitchronicle update</b> to rebuild."
+const TIERS = ["foundation", "framework", "feature", "tooling", "content", "inherited"];
+const TIER_LABEL = { foundation: "Foundation", framework: "Framework", feature: "Feature", tooling: "Tooling", content: "Content", inherited: "Inherited" };
+const TIER_HELP = {
+  foundation: "Everything stands on it: used across the codebase for years.",
+  framework: "A system other features are built with.",
+  feature: "Something a player or user experiences.",
+  tooling: "Built to make the project, not part of it.",
+  content: "Data and scripts: quests, maps, events.",
+  inherited: "Upkeep of code that predates the project — not something built here.",
 };
+const SETTABLE = TIERS.filter(t => t !== "inherited");
+let S = null;                     // the state served by /api/state
+let planText = "", savedPlan = "", dirty = 0;
+let byName = new Map(), uses = new Map(), usedBy = new Map();
+let route = { view: "ask", entry: null };
+const pendingMoves = [];          // decompositions made this session, shown on the tree
 
+// ---------- tiny DOM helper -----------------------------------------------------------
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const k in props) {
+    const v = props[k];
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "html") e.innerHTML = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat(3)) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function s(tag, attrs, ...kids) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs || {}) if (attrs[k] != null) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+}
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = n => Number(n).toLocaleString("en-US");
+const tcol = t => "var(--t-" + (t || "feature") + ")";
+const dotEl = t => h("span", { class: "dot", style: "background:" + tcol(t) });
+const tierPill = t => h("span", { class: "pill" }, dotEl(t), TIER_LABEL[t] || t);
+const ICON = {
+  search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  x: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  spark: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>',
+};
+const icon = k => h("span", { html: ICON[k], style: "display:contents" });
+function searchField(ph, oninput, value) {
+  const inp = h("input", { class: "field", placeholder: ph, value: value || "" });
+  inp.addEventListener("input", () => oninput(inp.value));
+  return h("div", { class: "search" }, icon("search"), inp);
+}
+function month(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1] + " " + y;
+}
+function span(a, b) {
+  if (!a) return "";
+  const A = month(a.slice(0, 7)), B = month((b || a).slice(0, 7));
+  return A === B ? A : A + " – " + B;
+}
+function monthsBetween(a, b) {
+  return (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)) + 1;
+}
+function duration(a, b) {
+  const n = monthsBetween(a, b);
+  if (n <= 1) return "under a month";
+  if (n < 24) return n + " months";
+  return (n / 12).toFixed(n % 12 ? 1 : 0) + " years";
+}
+
+// ---------- data -----------------------------------------------------------------------
 async function load() {
-  S = await (await fetch("/api/state")).json();
-  planText = S.plan;
-  const dl = $("entrynames"); dl.textContent = "";
-  for (const r of S.catalogue.slice().sort((a, b) => a.name.localeCompare(b.name)))
-    dl.append(new Option(r.name));
+  S = window.__STATE__ || await (await fetch("/api/state")).json();
+  window.__STATE__ = null;
+  planText = savedPlan = S.plan;
+  dirty = 0;
+  index();
+  $("proj").textContent = S.project || "studio";
+  const tl = S.timeline;
+  const y0 = tl.start ? tl.start.slice(0, 4) : "";
+  const y1 = tl.start ? String(+y0 + Math.floor((+tl.start.slice(5, 7) - 1 + tl.months - 1) / 12)) : "";
+  $("foot").replaceChildren(
+    h("div", null, h("b", null, fmt(S.catalogue.length)), " entries · ", h("b", null, fmt(S.edges.length)), " links"),
+    h("div", null, h("b", null, fmt(S.chapters)), " chapters · ", h("b", null, fmt(S.commits)), " commits"),
+    h("div", null, y0 + " – " + y1));
   render();
 }
 
-function setStatus(msg, cls) {
-  const s = $("status");
-  s.className = "grow " + (cls || "");
-  s.textContent = msg || (dirty
-    ? dirty + " unsaved rule" + (dirty > 1 ? "s" : "") + " — preview, then save"
-    : "No unsaved changes. Editing " + S.plan_path);
+function index() {
+  byName = new Map(S.catalogue.map(r => [r.name, r]));
+  uses = new Map(); usedBy = new Map();
+  for (const e of S.edges) {
+    if (!uses.has(e.src)) uses.set(e.src, []);
+    if (!usedBy.has(e.dst)) usedBy.set(e.dst, []);
+    uses.get(e.src).push(e.dst); usedBy.get(e.dst).push(e.src);
+  }
+  const dl = $("entrynames"); dl.textContent = "";
+  for (const n of [...byName.keys()].sort((a, b) => a.localeCompare(b))) dl.append(new Option(n));
+  $("nCat").textContent = S.catalogue.length;
+  const open = (S.trees || []).filter(t => !t.handled).length;
+  $("nRev").textContent = open || "";
+  $("nRul").textContent = parsePlan(planText).length || "";
 }
 
-function pendingNames() {
+// ---------- routing: #view or #view/Entry Name -----------------------------------------
+function parseHash() {
+  const raw = decodeURIComponent(location.hash.slice(1));
+  const i = raw.indexOf("/");
+  const view = (i < 0 ? raw : raw.slice(0, i)) || "ask";
+  return { view: VIEWS[view] ? view : "ask", entry: i < 0 ? null : raw.slice(i + 1) || null };
+}
+function go(view, entry) {
+  const hsh = "#" + view + (entry ? "/" + encodeURIComponent(entry) : "");
+  if (location.hash !== hsh) location.hash = hsh; else onRoute();
+}
+function openEntry(name, tab) { if (tab) drawerTab = tab; go(route.view, name); }
+let lastView = null;
+function onRoute() {
+  const r = parseHash();
+  const viewChanged = r.view !== lastView;
+  route = r;
+  if (viewChanged || !S) render(); else if (route.view === "graph") graphSelect(route.entry);
+  drawer(route.entry);
+}
+window.addEventListener("hashchange", onRoute);
+
+function render() {
+  if (!S) return;
+  lastView = route.view;
+  for (const n of document.querySelectorAll(".navi")) n.classList.toggle("on", n.dataset.v === route.view);
+  const main = $("main");
+  main.replaceChildren();
+  VIEWS[route.view](main);
+  dock();
+}
+for (const n of document.querySelectorAll(".navi")) n.onclick = () => go(n.dataset.v);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && route.entry) { go(route.view); return; }
+  if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+    const f = document.querySelector("#main input"); if (f) { e.preventDefault(); f.focus(); }
+  }
+});
+
+// =========================================================================================
+// ASK
+// =========================================================================================
+let askState = { q: "", hits: null, answer: null, busy: false };
+function suggestions() {
+  const cat = S.catalogue;
   const out = [];
-  const re = /^entry\s+"([^"]*)"/gm;
-  let m; while ((m = re.exec(planText))) out.push(m[1]);
+  const big = cat.filter(r => r.tier === "feature").sort((a, b) => b.commits - a.commits)[0];
+  if (big) out.push("How did the " + big.name + " evolve?");
+  const hub = cat.slice().sort((a, b) => b.fan_in - a.fan_in)[0];
+  if (hub) out.push("What is built on " + hub.name + "?");
+  const p = S.timeline.pulse;
+  if (p.length) {
+    const y0 = +S.timeline.start.slice(0, 4), m0 = +S.timeline.start.slice(5, 7) - 1;
+    const years = {};
+    p.forEach((n, i) => { const y = y0 + Math.floor((m0 + i) / 12); years[y] = (years[y] || 0) + n; });
+    const peak = Object.entries(years).sort((a, b) => b[1] - a[1])[0];
+    if (peak) out.push("What happened in " + peak[0] + "?");
+  }
+  const gone = cat.filter(r => r.lifecycle === "removed").sort((a, b) => b.commits - a.commits)[0];
+  if (gone) out.push("Why was " + gone.name + " removed?");
+  const fw = cat.filter(r => r.tier === "framework").sort((a, b) => b.commits - a.commits)[0];
+  if (fw) out.push("How does " + fw.name + " work?");
   return out;
 }
 
-async function addRule(text) {
-  planText = planText.replace(/\s*$/, "") + "\n\n" + text.trim() + "\n";
-  dirty++; setStatus();
-  await refreshTrees();       // a question just answered must leave the queue at once
+function renderAsk(main) {
+  const page = h("div", { class: "page" });
+  const inp = h("input", { placeholder: "Ask about " + (S.project || "the project") + " — what exists, why, and when it changed",
+                           value: askState.q, autofocus: true });
+  const btn = h("button", { class: "btn pri", type: "submit", disabled: !S.can_ask }, icon("spark"), "Ask");
+  if (!S.can_ask) btn.title = "No chat provider configured — search still works";
+  const form = h("form", { class: "askbox", onsubmit: e => { e.preventDefault(); doAsk(inp.value); } },
+                 icon("search"), inp, btn);
+  let t = null;
+  inp.addEventListener("input", () => {
+    askState.q = inp.value; clearTimeout(t);
+    t = setTimeout(() => doSearch(inp.value), 160);
+  });
+  const chips = h("div", { class: "chips" }, suggestions().map(q =>
+    h("button", { class: "chip", onclick: () => { inp.value = q; askState.q = q; doSearch(q); doAsk(q); } }, q)));
+  page.append(h("div", { class: "hero" },
+    h("h1", null, "Ask the chronicle"),
+    h("div", { class: "sub" }, fmt(S.catalogue.length) + " entries, " + fmt(S.chapters) + " chapters of history and "
+      + fmt(S.commits) + " commits. Results appear as you type; ", h("b", null, "Ask"), " writes an answer from them."),
+    form, askState.q ? null : chips),
+    h("div", { id: "answerBox" }), h("div", { id: "hitBox" }));
+  main.append(page);
+  drawAnswer(); drawHits();
+  setTimeout(() => inp.focus(), 0);
 }
 
-async function refreshTrees() {
-  const r = await (await fetch("/api/preview", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (r && r.trees) S.trees = r.trees;
-  return r;
+async function doSearch(q) {
+  if (!q.trim()) { askState.hits = null; drawHits(); return; }
+  const r = await (await fetch("/api/search?q=" + encodeURIComponent(q))).json();
+  if (q !== askState.q && askState.q) return;        // a newer keystroke owns the screen
+  askState.hits = r; drawHits();
 }
 
-// ---------- Review ----------------------------------------------------------------
-function renderReview() {
-  const m = $("main"); m.textContent = "";
-  const open = S.trees.filter(t => !skipped.has(t.dir) && !t.handled);
-  const done = S.trees.filter(t => t.handled);
-  m.append(el("h2", "", "Directories the catalogue split up"));
-  m.append(el("div", "sub", open.length + " still open, most suspicious first. "
-    + "A directory is suspicious when no single entry owns most of it and nothing in the "
-    + "catalogue is named after it."));
-  for (const t of open.slice(0, 40)) m.append(card(t));
-  if (!open.length) m.append(el("p", "sub", "Nothing left to review."));
+async function doAsk(q) {
+  q = q.trim(); if (!q || !S.can_ask) return;
+  askState.q = q; askState.busy = true; askState.answer = null; drawAnswer();
+  doSearch(q);
+  try {
+    const r = await (await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                               body: JSON.stringify({ q }) })).json();
+    askState.answer = r;
+  } catch (e) { askState.answer = { error: String(e) }; }
+  askState.busy = false; drawAnswer();
+}
 
-  if (done.length) {
-    const d = el("details");
-    d.style.marginTop = "18px";
-    d.append(el("summary", "", done.length + " already covered by a rule"));
-    for (const t of done) {
-      const r = el("div", "sub");
-      r.append(el("span", "mono", t.dir), " → ", el("b", "", t.handled));
-      d.append(r);
+function drawAnswer() {
+  const box = $("answerBox"); if (!box) return;
+  box.replaceChildren();
+  if (askState.busy) {
+    box.append(h("div", { class: "card answer" }, h("div", { class: "lbl" }, icon("spark"), "Reading the chronicle…"),
+      h("div", { class: "skel", style: "width:92%" }), h("div", { class: "skel", style: "width:78%" }),
+      h("div", { class: "skel", style: "width:85%" })));
+    return;
+  }
+  const a = askState.answer; if (!a) return;
+  if (a.error) { box.append(h("div", { class: "card answer" }, h("div", { class: "hint err" }, a.error))); return; }
+  box.append(h("div", { class: "card answer" },
+    h("div", { class: "lbl" }, icon("spark"), "Answer"),
+    h("div", { class: "md", html: markdown(a.answer) }),
+    a.used && a.used.length ? h("div", { class: "sources" }, "Read:", a.used.map(n =>
+      h("span", { class: "ref", onclick: () => openEntry(n) }, n))) : null));
+  for (const r of box.querySelectorAll("[data-entry]")) r.onclick = () => openEntry(r.dataset.entry, "story");
+}
+
+function markdown(src) {
+  // escaped first, so nothing the model writes can become markup of its own
+  const inline = t => esc(t)
+    .replace(/\[\[([^\]]+)\]\]/g, (m, n) => byName.has(n)
+      ? '<span class="ref" data-entry="' + esc(n) + '">' + esc(n) + "</span>" : "<b>" + esc(n) + "</b>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>");
+  const out = []; let list = null;
+  for (const raw of String(src).split("\n")) {
+    const line = raw.trim();
+    const li = line.match(/^([-*•]|\d+\.)\s+(.*)$/);
+    if (li) {
+      const kind = /\d/.test(li[1]) ? "ol" : "ul";
+      if (!list || list.kind !== kind) { if (list) out.push("</" + list.kind + ">"); list = { kind }; out.push("<" + kind + ">"); }
+      out.push("<li>" + inline(li[2]) + "</li>");
+      continue;
     }
-    m.append(d);
+    if (list) { out.push("</" + list.kind + ">"); list = null; }
+    if (line) out.push("<p>" + inline(line.replace(/^#+\s*/, "")) + "</p>");
+  }
+  if (list) out.push("</" + list.kind + ">");
+  return out.join("");
+}
+
+function drawHits() {
+  const box = $("hitBox"); if (!box) return;
+  box.replaceChildren();
+  const r = askState.hits; if (!r) return;
+  const cols = h("div", { class: "results" });
+  const col = (title, items, mk) => h("div", { class: "rcol" }, h("h3", null, title + (items.length ? " · " + items.length : "")),
+    items.length ? items.map(mk) : h("div", { class: "hit" }, h("div", { class: "s" }, "Nothing matched.")));
+  cols.append(
+    col("Entries", r.entries, e => {
+      const c = byName.get(e.name);
+      return h("div", { class: "hit", onclick: () => openEntry(e.name) },
+        h("b", null, dotEl(c && c.tier), e.name),
+        h("div", { class: "s", html: e.snip || esc(c ? c.definition : "") }));
+    }),
+    col("Chapters", r.chapters, c => h("div", { class: "hit", onclick: () => openEntry(c.entry, "story") },
+      h("b", null, c.title || "(untitled)"),
+      h("div", { class: "d" }, c.entry + " · " + span(c.start, c.end)),
+      h("div", { class: "s", html: c.snip || "" }))),
+    col("Commits", r.commits, c => h("div", { class: "hit", style: "cursor:default" },
+      h("b", { style: "font-weight:500" }, c.subject.slice(0, 120)),
+      h("div", { class: "d" }, h("span", { class: "mono" }, c.hash.slice(0, 10)), " · " + c.date + " · " + c.author))));
+  box.append(cols);
+}
+
+// =========================================================================================
+// CATALOGUE
+// =========================================================================================
+let catQ = "", catTier = "all", catSort = { k: "commits", dir: -1 };
+function sparkline(name, tier, w, hgt) {
+  const tl = S.timeline, ent = tl.entries[name];
+  const qn = Math.ceil(tl.months / 3);
+  const q = new Array(qn).fill(0);
+  if (ent) for (const [m, n] of ent.act) q[Math.floor(m / 3)] += n;
+  const mx = Math.max(1, ...q);
+  const bw = w / qn;
+  const g = s("svg", { width: w, height: hgt, viewBox: `0 0 ${w} ${hgt}`, style: "display:block" });
+  g.append(s("line", { x1: 0, x2: w, y1: hgt - .5, y2: hgt - .5, stroke: "var(--line)" }));
+  q.forEach((n, i) => {
+    if (!n) return;
+    const bh = Math.max(1.5, Math.sqrt(n / mx) * (hgt - 2));
+    g.append(s("rect", { x: i * bw, y: hgt - bh, width: Math.max(1, bw - .6), height: bh, fill: tcol(tier), rx: .6 }));
+  });
+  return g;
+}
+
+function renderCatalogue(main) {
+  const page = h("div", { class: "page" });
+  const counts = {}; for (const r of S.catalogue) counts[r.tier] = (counts[r.tier] || 0) + 1;
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" },
+    h("h1", null, "Catalogue"),
+    h("p", null, "Everything the knowledge base knows about, flat — tiers are an attribute, not a hierarchy. "
+      + "Click an entry to read its story, see its files, or split it apart."))));
+  const seg = h("div", { class: "seg" });
+  const segBtn = (k, label, n) => h("button", { class: catTier === k ? "on" : "", onclick: () => { catTier = k; draw(); paintSeg(); } },
+    k !== "all" ? dotEl(k) : null, label, h("small", null, n));
+  const paintSeg = () => seg.replaceChildren(segBtn("all", "All", S.catalogue.length),
+    ...TIERS.filter(t => counts[t]).map(t => segBtn(t, TIER_LABEL[t], counts[t])));
+  paintSeg();
+  page.append(h("div", { class: "toolbar" },
+    h("div", { style: "width:280px" }, searchField("Filter entries or paths…  /", v => { catQ = v; draw(); }, catQ)), seg));
+  const box = h("div"); page.append(box);
+  main.append(page);
+
+  const cols = [
+    { k: "name", t: "Entry" }, { k: "tier", t: "Tier" }, { k: "activity", t: "Activity" },
+    { k: "n_files", t: "Files", r: 1 }, { k: "commits", t: "Commits", r: 1 },
+    { k: "fan_in", t: "Used by", r: 1 }, { k: "born", t: "Span" }];
+  function draw() {
+    const f = catQ.trim().toLowerCase();
+    let rows = S.catalogue.filter(r => (catTier === "all" || r.tier === catTier)
+      && (!f || r.name.toLowerCase().includes(f) || (r.definition || "").toLowerCase().includes(f)
+          || r.files.some(p => p.toLowerCase().includes(f))));
+    const k = catSort.k === "activity" ? "last" : catSort.k;
+    rows.sort((a, b) => {
+      const x = a[k], y = b[k];
+      return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * catSort.dir;
+    });
+    const tb = h("table", { class: "list" });
+    tb.append(h("tr", null, cols.map(c => h("th", { class: c.r ? "r" : "", onclick: () => {
+      catSort = { k: c.k, dir: catSort.k === c.k ? -catSort.dir : (c.k === "name" ? 1 : -1) }; draw();
+    } }, c.t, catSort.k === c.k ? (catSort.dir > 0 ? " ↑" : " ↓") : ""))));
+    for (const r of rows) {
+      tb.append(h("tr", { class: "row" + (route.entry === r.name ? " sel" : ""), onclick: () => openEntry(r.name) },
+        h("td", null, h("div", { class: "ename" }, r.name,
+            r.lifecycle === "removed" ? h("span", { class: "tag bad" }, "removed") : null,
+            r.tier_from === "ledger" ? h("span", { class: "tag", title: "You set this tier" }, "curated") : null),
+          h("div", { class: "edef" }, r.definition || r.summary)),
+        h("td", null, tierPill(r.tier)),
+        h("td", null, sparkline(r.name, r.tier, 132, 22)),
+        h("td", { class: "r num" }, fmt(r.n_files)),
+        h("td", { class: "r num" }, fmt(r.commits)),
+        h("td", { class: "r num" }, r.fan_in || h("span", { class: "faint" }, "–")),
+        h("td", { class: "num muted", style: "white-space:nowrap" }, (r.born || "").slice(0, 4) + " – " + (r.last || "").slice(0, 4))));
+    }
+    box.replaceChildren(rows.length ? tb : h("div", { class: "empty" }, "No entry matches."));
+  }
+  draw();
+}
+
+// =========================================================================================
+// GRAPH — force-directed
+// =========================================================================================
+let G = null;                              // layout cache, keyed by the edge set
+const gOpts = { isolated: false, hidden: new Set() };
+
+function hash(str) { let x = 2166136261; for (const c of str) x = Math.imul(x ^ c.charCodeAt(0), 16777619); return x >>> 0; }
+
+function forceLayout(nodes, links) {
+  // Fruchterman–Reingold with gravity and collision. Seeded from the names, so the same
+  // catalogue always lands in the same place and a reload does not reshuffle the map.
+  const N = nodes.length; if (!N) return;
+  const W = 1600, H = 1100, k = Math.sqrt(W * H / N) * .55;
+  nodes.forEach(n => { const a = hash(n.name); n.x = (a % 1000) / 1000 * W - W / 2; n.y = ((a >>> 10) % 1000) / 1000 * H - H / 2; });
+  const idx = new Map(nodes.map((n, i) => [n.name, i]));
+  const L = links.map(l => [idx.get(l.src), idx.get(l.dst)]).filter(p => p[0] != null && p[1] != null);
+  let t = W / 10;
+  const dx = new Float64Array(N), dy = new Float64Array(N);
+  for (let it = 0; it < 420; it++) {
+    dx.fill(0); dy.fill(0);
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      let ex = nodes[i].x - nodes[j].x, ey = nodes[i].y - nodes[j].y;
+      let d2 = ex * ex + ey * ey; if (d2 < .01) { ex = .1; ey = .1; d2 = .02; }
+      const d = Math.sqrt(d2);
+      // hubs push harder: many shared dependents otherwise pile them on top of each other
+      let f = k * k / d * (1 + (nodes[i].r + nodes[j].r - 12) / 18);
+      const minD = nodes[i].r + nodes[j].r + 14 + (nodes[i].fan >= 3 && nodes[j].fan >= 3 ? 70 : 0);
+      if (d < minD) f += (minD - d) * 6;
+      dx[i] += ex / d * f; dy[i] += ey / d * f; dx[j] -= ex / d * f; dy[j] -= ey / d * f;
+    }
+    for (const [a, b] of L) {
+      const ex = nodes[a].x - nodes[b].x, ey = nodes[a].y - nodes[b].y;
+      const d = Math.sqrt(ex * ex + ey * ey) || .1, f = d * d / k * .9;
+      dx[a] -= ex / d * f; dy[a] -= ey / d * f; dx[b] += ex / d * f; dy[b] += ey / d * f;
+    }
+    for (let i = 0; i < N; i++) {
+      const n = nodes[i];
+      // gravity grows with distance, so a small separate cluster stays in sight of the
+      // main one instead of being pushed off the page; a little flatter than round
+      dx[i] -= n.x * .16 * k / 40; dy[i] -= n.y * .22 * k / 40;
+      const d = Math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]) || 1;
+      n.x += dx[i] / d * Math.min(d, t); n.y += dy[i] / d * Math.min(d, t);
+    }
+    t = Math.max(1, t * .985);
+  }
+  packComponents(nodes, L);
+}
+
+function packComponents(nodes, L) {
+  // Repulsion pushes unconnected clusters apart without limit, and fitting the view to the
+  // gap between them shrinks everything to specks. Lay the clusters side by side instead.
+  const adj = nodes.map(() => []);
+  for (const [a, b] of L) { adj[a].push(b); adj[b].push(a); }
+  const comp = new Array(nodes.length).fill(-1), comps = [];
+  nodes.forEach((_, i) => {
+    if (comp[i] >= 0) return;
+    const c = [], st = [i]; comp[i] = comps.length;
+    while (st.length) { const v = st.pop(); c.push(v); for (const w of adj[v]) if (comp[w] < 0) { comp[w] = comps.length; st.push(w); } }
+    comps.push(c);
+  });
+  if (comps.length < 2) return;
+  comps.sort((a, b) => b.length - a.length);
+  const box = c => { const xs = c.map(i => nodes[i].x), ys = c.map(i => nodes[i].y);
+    return { x0: Math.min(...xs) - 30, x1: Math.max(...xs) + 30, y0: Math.min(...ys) - 30, y1: Math.max(...ys) + 30 }; };
+  const main = box(comps[0]);
+  let x = main.x1 + 40, y = main.y0, colW = 0;
+  for (const c of comps.slice(1)) {
+    const b = box(c), w = b.x1 - b.x0, hh = b.y1 - b.y0;
+    if (y + hh > main.y1 && y > main.y0) { y = main.y0; x += colW + 30; colW = 0; }
+    for (const i of c) { nodes[i].x += x - b.x0; nodes[i].y += y - b.y0; }
+    y += hh + 20; colW = Math.max(colW, w);
   }
 }
 
-function card(t) {
-  const c = el("div", "card");
-  c.append(el("h3", "", t.dir));
-  c.append(el("div", "facts", t.files + " files · split across " + t.entries
-    + " entries · largest holder “" + t.top + "” has only "
-    + Math.round(t.top_share * 100) + "%"));
-
-  const cols = el("div", "cols");
-  const a = el("div"); a.append(el("h4", "", "what is in it"));
-  for (const s of t.samples) a.append(el("div", "mono", s));
-  const b = el("div"); b.append(el("h4", "", "currently filed under"));
-  for (const [n, k] of t.holders) b.append(el("div", "mono", k + "  " + n));
-  cols.append(a, b); c.append(cols);
-
-  const acts = el("div", "acts");
-  const mk = el("button", "p", "These are one thing →");
-  const skip = el("button", "s", "Correctly separate — skip");
-  acts.append(mk, skip);
-  c.append(acts);
-
-  mk.onclick = () => {
-    acts.textContent = "";
-    const name = el("input");
-    name.setAttribute("list", "entrynames");      // every existing entry, autocompleted
-    name.value = t.top;                           // default to the entry already holding most
-    const tier = el("select");
-    for (const o of ["tooling", "framework", "foundation", "feature", "content"])
-      tier.append(new Option(o, o));
-    const go = el("button", "p", "Add rule");
-    const cancel = el("button", "s", "Cancel");
-    const hint = el("div", "sub");
-    acts.append(el("span", "sub", "Belongs to:"), name, tier, go, cancel);
-    c.append(hint);
-
-    // Naming is where curation goes wrong silently: typing "Luna" when the catalogue says
-    // "Luna Scripting System" does not extend that entry, it CARVES 19 files out of it,
-    // and "ccc" beside "CCC" makes two products out of one. Say which is about to happen.
-    const judge = () => {
-      const v = name.value.trim();
-      // Candidates are the catalogue PLUS entries declared by rules written this session:
-      // "ccc" and "CCC" both look new against the database, and only collide with each
-      // other, which is exactly how one backoffice became two products.
-      const pending = pendingNames().filter(n => !S.catalogue.some(r => r.name === n));
-      const all = S.catalogue.map(r => r.name).concat(pending);
-      const exact = S.catalogue.find(r => r.name === v);
-      if (exact) {
-        tier.value = exact.tier;
-        hint.className = "sub ok";
-        hint.textContent = "↳ adds to the existing entry “" + exact.name + "” ("
-          + exact.n_files + " files, " + exact.tier + ")";
-        return;
-      }
-      if (pending.includes(v)) {
-        hint.className = "sub ok";
-        hint.textContent = "↳ adds to “" + v + "”, which you declared earlier in this session";
-        return;
-      }
-      const lower = v.toLowerCase();
-      const sameWord = all.filter(n => n !== v && lower && n.toLowerCase() === lower);
-      if (sameWord.length) {
-        hint.className = "sub err";
-        hint.textContent = "⚠ “" + sameWord[0] + "” already exists and differs only in "
-          + "capitalisation — names are case-sensitive, so this would make a second entry.";
-        return;
-      }
-      const near = all.filter(n => n !== v && lower
-        && (n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase())));
-      if (near.length) {
-        hint.className = "sub err";
-        hint.textContent = "⚠ creates a NEW entry and takes files away from: "
-          + near.slice(0, 3).map(n => "“" + n + "”").join(", ")
-          + ". Pick the exact name to extend one instead.";
-      } else {
-        hint.className = "sub";
-        hint.textContent = v ? "+ creates a new entry “" + v + "”" : "";
-      }
-    };
-    name.oninput = judge;
-    name.focus(); name.select(); judge();
-
-    cancel.onclick = () => { renderReview(); };
-    go.onclick = async () => {
-      if (!name.value.trim()) { hint.className = "sub err"; hint.textContent = "Name it first."; return; }
-      await addRule('entry "' + name.value.trim() + '"\n  claim  ' + t.dir + '/**\n  tier   ' + tier.value);
-      c.className = "card done";
-      acts.textContent = "";
-      hint.textContent = "";
-      acts.append(el("span", "ok", "✓ rule added"));
-    };
-  };
-  skip.onclick = async () => {
-    await addRule("keep-split " + t.dir + "/**");
-    c.className = "card done";
-    c.querySelector(".acts").textContent = "";
-    c.querySelector(".acts").append(el("span", "ok", "✓ recorded as correctly separate"));
-  };
-  return c;
+function graphData() {
+  const connected = new Set(); for (const e of S.edges) { connected.add(e.src); connected.add(e.dst); }
+  const nodes = S.catalogue.filter(r => (gOpts.isolated || connected.has(r.name)) && !gOpts.hidden.has(r.tier))
+    .map(r => ({ name: r.name, tier: r.tier, fan: r.fan_in, files: r.n_files, commits: r.commits,
+                 r: 6 + Math.sqrt(r.fan_in || 0) * 4 }));
+  const keep = new Set(nodes.map(n => n.name));
+  const links = S.edges.filter(e => keep.has(e.src) && keep.has(e.dst));
+  const key = nodes.map(n => n.name).join("|") + "#" + links.length;
+  if (!G || G.key !== key) {
+    const prev = G ? new Map(G.nodes.map(n => [n.name, n])) : new Map();
+    forceLayout(nodes, links);
+    for (const n of nodes) { const p = prev.get(n.name); if (p && p.pinned) { n.x = p.x; n.y = p.y; n.pinned = true; } }
+    G = { key, nodes, links, view: null };
+  }
+  return G;
 }
 
-// ---------- Catalogue --------------------------------------------------------------
-function renderCatalogue() {
-  const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", "Catalogue"));
-  const q = el("input"); q.placeholder = "filter by name…";
-  q.style.margin = "10px 0"; m.append(q);
-  const box = el("div"); m.append(box);
-  const draw = () => {
-    box.textContent = "";
-    const f = q.value.trim().toLowerCase();
-    for (const tier of ["foundation", "framework", "feature", "tooling", "content"]) {
-      const rows = S.catalogue.filter(r => r.tier === tier
-        && (!f || r.name.toLowerCase().includes(f)));
-      if (!rows.length) continue;
-      box.append(el("h2", "", tier + " (" + rows.length + ")"));
-      const tb = el("table"); const hr = el("tr");
-      ["entry", "files", "commits", "used by", "active", "set by", ""].forEach((h, i) =>
-        hr.append(el("th", (i >= 1 && i <= 3) ? "num" : "", h)));
-      tb.append(hr);
-      rows.sort((x, y) => y.commits - x.commits);
-      for (const r of rows) {
-        const tr = el("tr");
-        const td = el("td"); td.append(el("b", "", r.name));
-        if (r.definition) td.append(el("div", "sub", r.definition.slice(0, 140)));
-        const d = el("details"); d.append(el("summary", "", "territory"));
-        for (const x of r.files) d.append(el("div", "mono", x));
-        if (r.n_files > r.files.length)
-          d.append(el("div", "sub", "… " + (r.n_files - r.files.length) + " more"));
-        td.append(d); tr.append(td);
-        tr.append(el("td", "num", String(r.n_files)), el("td", "num", String(r.commits)),
-                  el("td", "num", String(r.fan_in)),
-                  el("td", "", r.born + "→" + r.last + (r.lifecycle === "removed" ? " ✕" : "")),
-                  el("td", "", r.tier_from));
-        const act = el("td"); const sel = el("select");
-        sel.append(new Option("change tier…", ""));
-        for (const o of ["foundation", "framework", "feature", "tooling", "content"])
-          if (o !== r.tier) sel.append(new Option("→ " + o, o));
-        sel.onchange = () => { if (!sel.value) return;
-          addRule('entry "' + r.name + '"\n  tier   ' + sel.value);
-          sel.disabled = true; };
-        act.append(sel); tr.append(act);
-        tb.append(tr);
+let graphSelect = () => {};
+function renderGraph(main) {
+  const page = h("div", { class: "page wide" });
+  const wrap = h("div", { id: "gwrap" });
+  page.append(wrap); main.append(page);
+  const g = graphData();
+  const connected = new Set(); for (const e of S.edges) { connected.add(e.src); connected.add(e.dst); }
+  const nIso = S.catalogue.filter(r => !connected.has(r.name)).length;
+
+  const svg = s("svg", {});
+  const defs = s("defs", {}, s("marker", { id: "arr", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" },
+    s("path", { d: "M0,1 L9,5 L0,9 z", fill: "var(--faint)" })),
+    s("marker", { id: "arrh", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" },
+    s("path", { d: "M0,1 L9,5 L0,9 z", fill: "var(--acc)" })));
+  const vp = s("g", {});
+  svg.append(defs, vp);
+  wrap.append(svg);
+
+  const nb = new Map(g.nodes.map(n => [n.name, new Set([n.name])]));
+  for (const l of g.links) { nb.get(l.src).add(l.dst); nb.get(l.dst).add(l.src); }
+  const pos = new Map(g.nodes.map(n => [n.name, n]));
+  const edgeEls = g.links.map(l => {
+    const p = s("line", { class: "edge", "marker-end": "url(#arr)" });
+    p._l = l; vp.append(p); return p;
+  });
+  const labelled = n => n.fan >= 3 || g.nodes.length <= 40;
+  const nodeEls = g.nodes.map(n => {
+    const el = s("g", { class: "node", style: "cursor:pointer" },
+      s("circle", { r: n.r, fill: tcol(n.tier) }),
+      s("text", { y: -n.r - 5, "text-anchor": "middle", style: labelled(n) ? "" : "opacity:0" }, n.name));
+    el._n = n; vp.append(el); return el;
+  });
+  function place() {
+    for (const el of nodeEls) el.setAttribute("transform", `translate(${el._n.x},${el._n.y})`);
+    for (const p of edgeEls) {
+      const a = pos.get(p._l.src), b = pos.get(p._l.dst);
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+      p.setAttribute("x1", a.x + dx / d * a.r); p.setAttribute("y1", a.y + dy / d * a.r);
+      p.setAttribute("x2", b.x - dx / d * (b.r + 3)); p.setAttribute("y2", b.y - dy / d * (b.r + 3));
+    }
+  }
+  place();
+
+  // ---- view transform: pan + zoom around the pointer
+  let V = g.view;
+  function fit() {
+    const W = wrap.clientWidth || 1000, H = wrap.clientHeight || 700;
+    const xs = g.nodes.map(n => n.x), ys = g.nodes.map(n => n.y);
+    const x0 = Math.min(...xs) - 60, x1 = Math.max(...xs) + 60, y0 = Math.min(...ys) - 60, y1 = Math.max(...ys) + 60;
+    const left = W > 900 ? 320 : 0;                  // keep clear of the side panel
+    const k = Math.min((W - left - 40) / (x1 - x0), (H - 40) / (y1 - y0), 2);
+    V = { k, x: left + (W - left - (x1 - x0) * k) / 2 - x0 * k, y: (H - (y1 - y0) * k) / 2 - y0 * k };
+    apply();
+  }
+  function apply() { if (!V) return; g.view = V; vp.setAttribute("transform", `translate(${V.x},${V.y}) scale(${V.k})`);
+    const showAll = V.k > 1.3;
+    // labels and outlines keep their on-screen size whatever the zoom
+    const fs = 11.5 / V.k;
+    for (const el of nodeEls) {
+      const t = el.lastChild;
+      t.setAttribute("font-size", fs); t.setAttribute("y", -el._n.r - 4 / V.k);
+      t.style.strokeWidth = (3.5 / V.k) + "px";
+      t.style.opacity = (showAll || labelled(el._n) || el.classList.contains("hot")) ? "" : "0";
+      el.firstChild.style.strokeWidth = (2 / V.k) + "px";
+    }
+    for (const p of edgeEls) p.style.strokeWidth = (p.classList.contains("hot") ? 1.8 : 1) / V.k + "px"; }
+  if (V) apply(); else requestAnimationFrame(fit);
+  svg.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const f = Math.exp(-e.deltaY * .0015), k = Math.min(6, Math.max(.2, V.k * f));
+    V = { k, x: mx - (mx - V.x) * k / V.k, y: my - (my - V.y) * k / V.k }; apply();
+  }, { passive: false });
+
+  // ---- drag: background pans, a node moves (and stays where you put it)
+  let drag = null;
+  svg.addEventListener("pointerdown", e => {
+    const ne = e.target.closest(".node");
+    drag = { x: e.clientX, y: e.clientY, node: ne ? ne._n : null, moved: false, v: { ...V } };
+    svg.setPointerCapture(e.pointerId);
+    if (!ne) svg.classList.add("panning");
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!drag) { hover(e); return; }
+    const ddx = e.clientX - drag.x, ddy = e.clientY - drag.y;
+    if (Math.abs(ddx) + Math.abs(ddy) > 3) drag.moved = true;
+    if (drag.node) { drag.node.x += ddx / V.k; drag.node.y += ddy / V.k; drag.node.pinned = true; drag.x = e.clientX; drag.y = e.clientY; place(); }
+    else { V = { k: V.k, x: drag.v.x + ddx, y: drag.v.y + ddy }; apply(); }
+  });
+  svg.addEventListener("pointerup", e => {
+    svg.classList.remove("panning");
+    const d = drag; drag = null;
+    if (d && !d.moved) {
+      if (d.node) openEntry(d.node.name);
+      else if (route.entry) go("graph");
+    }
+  });
+
+  // ---- focus: a node lights up itself, what it uses and what uses it
+  let hoverName = null;
+  function focus(name) {
+    const set = name ? nb.get(name) : null;
+    svg.classList.toggle("focus", !!set);
+    for (const el of nodeEls) {
+      el.classList.toggle("hot", !!set && set.has(el._n.name));
+      el.classList.toggle("sel", el._n.name === route.entry);
+    }
+    for (const p of edgeEls) {
+      const hot = !!set && (p._l.src === name || p._l.dst === name);
+      p.classList.toggle("hot", hot);
+      p.setAttribute("marker-end", hot ? "url(#arrh)" : "url(#arr)");
+    }
+    apply();
+  }
+  const tip = $("tip");
+  function hover(e) {
+    const ne = e.target.closest && e.target.closest(".node");
+    const name = ne ? ne._n.name : null;
+    if (name !== hoverName) { hoverName = name; focus(name || (route.entry && nb.has(route.entry) ? route.entry : null)); }
+    if (ne) {
+      const n = ne._n;
+      tip.replaceChildren(h("b", null, n.name),
+        h("div", { class: "muted" }, TIER_LABEL[n.tier] + " · " + fmt(n.files) + " files · " + fmt(n.commits) + " commits"),
+        h("div", { class: "muted" }, "uses " + (uses.get(n.name) || []).length + " · used by " + (usedBy.get(n.name) || []).length));
+      tip.style.display = "block"; tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY + 14) + "px";
+    } else tip.style.display = "none";
+  }
+  svg.addEventListener("pointerleave", () => { tip.style.display = "none"; hoverName = null; focus(route.entry && nb.has(route.entry) ? route.entry : null); });
+  graphSelect = name => {
+    focus(name && nb.has(name) ? name : null);
+    if (name && pos.has(name)) {       // bring a node chosen elsewhere into view
+      const n = pos.get(name), W = wrap.clientWidth, H = wrap.clientHeight;
+      const sx = n.x * V.k + V.x, sy = n.y * V.k + V.y;
+      const right = route.entry ? Math.min(600, W) : 0;
+      if (sx < 330 || sx > W - right - 40 || sy < 40 || sy > H - 40) {
+        V = { k: V.k, x: V.x + ((W - right + 320) / 2 - sx), y: V.y + (H / 2 - sy) }; apply();
       }
-      box.append(tb);
     }
   };
-  q.oninput = draw; draw();
+
+  // ---- side panel
+  const counts = {}; for (const r of S.catalogue) if (gOpts.isolated || connected.has(r.name)) counts[r.tier] = (counts[r.tier] || 0) + 1;
+  const find = h("input", { class: "field", placeholder: "Find an entry…", list: "entrynames" });
+  find.addEventListener("change", () => { if (pos.has(find.value)) openEntry(find.value); });
+  wrap.append(h("div", { class: "card gpanel" },
+    h("div", null, h("h1", null, "Dependency graph"),
+      h("div", { class: "hint" }, fmt(g.nodes.length) + " entries · " + fmt(g.links.length) + " “uses” links. "
+        + "Arrows point at what is built on; bigger means more things depend on it.")),
+    h("div", { class: "search" }, icon("search"), find),
+    h("div", { class: "legend" }, TIERS.filter(t => counts[t]).map(t =>
+      h("button", { class: gOpts.hidden.has(t) ? "off" : "", title: TIER_HELP[t], onclick: () => {
+        gOpts.hidden.has(t) ? gOpts.hidden.delete(t) : gOpts.hidden.add(t); G = null; render(); } },
+        dotEl(t), TIER_LABEL[t], h("small", null, counts[t])))),
+    h("label", { class: "hint", style: "display:flex;gap:8px;align-items:center;cursor:pointer" },
+      h("input", { type: "checkbox", checked: gOpts.isolated, onchange: e => { gOpts.isolated = e.target.checked; G = null; render(); } }),
+      "Include " + nIso + " entries with no links")));
+  wrap.append(h("div", { class: "ghelp" }, "Scroll to zoom · drag to pan · drag a node to pin it · click for details"));
+  wrap.append(h("div", { class: "gzoom" }, h("button", { class: "btn", onclick: fit }, "Fit"),
+    h("button", { class: "btn", onclick: () => { G = null; render(); } }, "Re-layout")));
+  focus(route.entry && nb.has(route.entry) ? route.entry : null);
 }
 
-// ---------- Rules ------------------------------------------------------------------
-// The plan is the WHOLE statement of your curation, not a log of actions: every run
-// replays it from nothing. So there is no undo stack to unwind — changing a rule means
-// changing its text, and deleting one removes its effect completely.
+// =========================================================================================
+// TIMELINE
+// =========================================================================================
+let tlQ = "", tlTier = "all", tlSort = "born", tlYear = null;
+function renderTimeline(main) {
+  const tl = S.timeline;
+  const page = h("div", { class: "page", style: "max-width:1400px" });
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" },
+    h("h1", null, "Timeline"),
+    h("p", null, "When each thing was worked on. Every row is an entry; each cell is a month, darker for more commits, "
+      + "and the tinted bands are the chapters its story is told in. Click a year for what happened then, a row for its story."))));
+  if (!tl.start) { page.append(h("div", { class: "empty" }, "No history.")); main.append(page); return; }
+  const y0 = +tl.start.slice(0, 4), m0 = +tl.start.slice(5, 7) - 1;
+  const yearOf = i => y0 + Math.floor((m0 + i) / 12);
+  const monthIdx = ym => (+ym.slice(0, 4) - y0) * 12 + (+ym.slice(5, 7) - 1 - m0);
+  const nY = yearOf(tl.months - 1) - y0 + 1;
+
+  const LW = 230, W = 1100, CW = W - LW - 10;
+  const cx = i => LW + (i / tl.months) * CW;
+  const cw = CW / tl.months;
+
+  // ---- project pulse
+  const pmax = Math.max(1, ...tl.pulse);
+  const PH = 96;
+  const pulse = s("svg", { viewBox: `0 0 ${W} ${PH + 22}`, style: "width:100%;display:block" });
+  const yearTotals = new Array(nY).fill(0);
+  tl.pulse.forEach((n, i) => { yearTotals[yearOf(i) - y0] += n; });
+  for (let y = 0; y < nY; y++) {
+    const a = Math.max(0, (y * 12) - m0), b = Math.min(tl.months, (y + 1) * 12 - m0);
+    const on = tlYear === y0 + y;
+    pulse.append(s("rect", { x: cx(a), y: 0, width: cx(b) - cx(a), height: PH + 22, fill: on ? "var(--acc-soft)" : "transparent",
+      style: "cursor:pointer", onclick: () => { tlYear = on ? null : y0 + y; render(); } },
+      s("title", {}, (y0 + y) + ": " + fmt(yearTotals[y]) + " commits")));
+    pulse.append(s("line", { x1: cx(a), x2: cx(a), y1: 0, y2: PH + 4, stroke: "var(--line)" }));
+    pulse.append(s("text", { x: cx(a) + 4, y: PH + 17, "font-size": 11, fill: on ? "var(--acc)" : "var(--faint)",
+      "font-weight": on ? 700 : 500, style: "pointer-events:none" }, String(y0 + y)));
+  }
+  tl.pulse.forEach((n, i) => {
+    if (!n) return;
+    const bh = Math.sqrt(n / pmax) * (PH - 6);
+    pulse.append(s("rect", { x: cx(i) + .5, y: PH - bh, width: Math.max(1, cw - 1), height: bh, rx: 1,
+      fill: tlYear === yearOf(i) ? "var(--acc)" : "var(--faint)", "fill-opacity": .75, style: "pointer-events:none" }));
+  });
+  pulse.append(s("text", { x: 0, y: 14, "font-size": 12, "font-weight": 600, fill: "var(--fg-2)" }, "Commits per month"));
+  pulse.append(s("text", { x: 0, y: 30, "font-size": 11.5, fill: "var(--muted)" }, fmt(S.commits) + " in total"));
+  page.append(h("div", { class: "card pulse" }, pulse));
+
+  if (tlYear) page.append(yearPanel(tlYear, monthIdx));
+
+  // ---- controls
+  const counts = {}; for (const r of S.catalogue) counts[r.tier] = (counts[r.tier] || 0) + 1;
+  const seg = h("div", { class: "seg" }, h("button", { class: tlTier === "all" ? "on" : "", onclick: () => { tlTier = "all"; render(); } }, "All"),
+    TIERS.filter(t => counts[t]).map(t => h("button", { class: tlTier === t ? "on" : "", onclick: () => { tlTier = t; render(); } }, dotEl(t), TIER_LABEL[t])));
+  const sort = h("div", { class: "seg" }, [["born", "First seen"], ["last", "Last active"], ["commits", "Most work"]].map(([k, l]) =>
+    h("button", { class: tlSort === k ? "on" : "", onclick: () => { tlSort = k; render(); } }, l)));
+  const lanesBox = h("div", { class: "card lanes" });
+  page.append(h("div", { class: "toolbar" }, h("div", { style: "width:240px" }, searchField("Filter…", v => { tlQ = v; drawLanes(); }, tlQ)), seg, sort));
+  page.append(lanesBox);
+  main.append(page);
+
+  function drawLanes() {
+    const f = tlQ.trim().toLowerCase();
+    const rows = S.catalogue.filter(r => (tlTier === "all" || r.tier === tlTier) && (!f || r.name.toLowerCase().includes(f))
+      && tl.entries[r.name] && tl.entries[r.name].act.length);
+    rows.sort(tlSort === "commits" ? (a, b) => b.commits - a.commits
+      : tlSort === "last" ? (a, b) => (b.last || "").localeCompare(a.last || "")
+      : (a, b) => (a.tier === "inherited") - (b.tier === "inherited") || (a.born || "").localeCompare(b.born || "") || a.name.localeCompare(b.name));
+    const RH = 20, top = 26;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${top + rows.length * RH + 6}` });
+    const cellMax = 24;
+    for (let y = 0; y < nY; y++) {
+      const a = Math.max(0, y * 12 - m0);
+      svg.append(s("line", { x1: cx(a), x2: cx(a), y1: 16, y2: top + rows.length * RH, stroke: "var(--line-2)" }));
+      svg.append(s("text", { x: cx(a) + 3, y: 14, "font-size": 11, fill: tlYear === y0 + y ? "var(--acc)" : "var(--faint)" }, String(y0 + y)));
+    }
+    if (tlYear) {
+      const a = Math.max(0, (tlYear - y0) * 12 - m0), b = Math.min(tl.months, (tlYear - y0 + 1) * 12 - m0);
+      svg.append(s("rect", { x: cx(a), y: 18, width: cx(b) - cx(a), height: rows.length * RH + 8, fill: "var(--acc)", "fill-opacity": .06 }));
+    }
+    rows.forEach((r, i) => {
+      const e = tl.entries[r.name], y = top + i * RH;
+      const lane = s("g", { class: "lane", onclick: () => openEntry(r.name, "story") });
+      lane.append(s("rect", { class: "lbg", x: 0, y, width: W, height: RH, fill: route.entry === r.name ? "var(--acc-soft)" : "transparent", rx: 4 }));
+      lane.append(s("circle", { cx: 8, cy: y + RH / 2, r: 3.5, fill: tcol(r.tier) }));
+      lane.append(s("text", { x: 18, y: y + RH / 2 + 4 }, r.name.length > 30 ? r.name.slice(0, 29) + "…" : r.name));
+      const first = e.act[0][0], last = e.act[e.act.length - 1][0];
+      lane.append(s("line", { x1: cx(first), x2: cx(last) + cw, y1: y + RH / 2, y2: y + RH / 2, stroke: tcol(r.tier), "stroke-opacity": .25 }));
+      for (const [a, b] of e.arcs) lane.append(s("rect", { x: cx(a), y: y + 3, width: Math.max(cw, cx(b) - cx(a) + cw), height: RH - 6, rx: 3,
+        fill: tcol(r.tier), "fill-opacity": .1, stroke: tcol(r.tier), "stroke-opacity": .28, "stroke-width": .6 }));
+      for (const [m, n] of e.act) lane.append(s("rect", { x: cx(m) + .3, y: y + 5, width: Math.max(1, cw - .6), height: RH - 10, rx: 1,
+        fill: tcol(r.tier), "fill-opacity": .25 + .75 * Math.min(1, Math.sqrt(n / cellMax)) }));
+      lane.append(s("title", {}, r.name + "\n" + span(r.born, r.last) + " · " + r.commits + " commits · " + e.arcs.length + " chapters"
+        + (e.arcs.length ? "\n\n" + e.arcs.slice(-6).map(a => "• " + (a[2] || "(untitled)")).join("\n") : "")));
+      svg.append(lane);
+    });
+    lanesBox.replaceChildren(rows.length ? svg : h("div", { class: "empty" }, "No entry matches."));
+  }
+  drawLanes();
+}
+
+function yearPanel(year, monthIdx) {
+  const tl = S.timeline;
+  const a = monthIdx(year + "-01"), b = monthIdx(year + "-12");
+  const act = [];
+  for (const r of S.catalogue) {
+    const e = tl.entries[r.name]; if (!e || r.tier === "inherited") continue;
+    const n = e.act.reduce((t, [m, k]) => t + (m >= a && m <= b ? k : 0), 0);
+    if (n) act.push({ r, n, arcs: e.arcs.filter(x => x[1] >= a && x[0] <= b) });
+  }
+  act.sort((x, y) => y.n - x.n);
+  const born = S.catalogue.filter(r => (r.born || "").startsWith(String(year))).sort((x, y) => y.commits - x.commits);
+  const ended = S.catalogue.filter(r => (r.last || "").startsWith(String(year)) && r.lifecycle === "removed");
+  const quiet = S.catalogue.filter(r => (r.last || "").startsWith(String(year)) && r.lifecycle !== "removed" && +((S.timeline.start || "").slice(0, 4)) <= year)
+    .sort((x, y) => y.commits - x.commits);
+  const total = tl.pulse.slice(Math.max(0, a), b + 1).reduce((x, y) => x + y, 0);
+  const item = (r, extra) => h("div", { class: "it", onclick: () => openEntry(r.name, "story") }, dotEl(r.tier), h("div", null, h("b", null, r.name), extra ? h("div", null, h("span", null, extra)) : null));
+  return h("div", { class: "card yr" },
+    h("div", { style: "display:flex;align-items:baseline;gap:12px" }, h("h3", { style: "font-size:18px" }, String(year)),
+      h("span", { class: "muted" }, fmt(total) + " commits · " + act.length + " entries active · " + born.length + " first seen"),
+      h("button", { class: "btn ghost", style: "margin-left:auto", onclick: () => { tlYear = null; render(); } }, "Close")),
+    h("div", { class: "cols" },
+      h("div", null, h("h4", null, "Most worked on"), act.slice(0, 8).map(x =>
+        item(x.r, x.n + " commits" + (x.arcs.length ? " — " + x.arcs.map(c => c[2]).filter(Boolean).slice(0, 2).join("; ") : "")))),
+      h("div", null, h("h4", null, "First seen"), born.length ? born.slice(0, 8).map(r => item(r, (r.definition || "").slice(0, 90)))
+        : h("div", { class: "muted" }, "Nothing new this year.")),
+      h("div", null, h("h4", null, ended.length ? "Removed" : "Last touched"),
+        (ended.length ? ended : quiet).slice(0, 8).map(r => item(r, span(r.born, r.last))),
+        !ended.length && !quiet.length ? h("div", { class: "muted" }, "—") : null)));
+}
+
+// =========================================================================================
+// DRAWER — one entry: story, territory (decompose), links, curate
+// =========================================================================================
+let drawerTab = "story", storyCache = new Map(), drawerFor = null;
+async function drawer(name) {
+  const d = $("drawer");
+  document.body.classList.toggle("dopen", !!name && byName.has(name));
+  if (!name) { d.classList.remove("open"); drawerFor = null; markRows(); return; }
+  const r = byName.get(name);
+  if (!r) { d.classList.remove("open"); return; }
+  if (drawerFor !== name) { if (!["story", "files", "links", "curate"].includes(drawerTab)) drawerTab = "story"; }
+  const old = d.querySelector(".db");
+  const keep = old && drawerFor === name && d.dataset.tab === drawerTab ? old.scrollTop : 0;
+  d.dataset.tab = drawerTab;
+  drawerFor = name;
+  d.classList.add("open");
+  markRows();
+  const up = uses.get(name) || [], down = usedBy.get(name) || [];
+  const tabs = [["story", "Story", (S.timeline.entries[name] || { arcs: [] }).arcs.length], ["files", "Files", r.n_files],
+                ["links", "Links", up.length + down.length], ["curate", "Curate", ""]];
+  const body = h("div", { class: "db" });
+  const tabBar = h("div", { class: "tabs" }, tabs.map(([k, l, n]) => h("button", { class: drawerTab === k ? "on" : "",
+    onclick: () => { drawerTab = k; drawer(name); } }, l, n !== "" ? h("small", null, n) : null)));
+  d.replaceChildren(
+    h("div", { class: "dh" },
+      h("div", { class: "top" }, tierPill(r.tier),
+        r.lifecycle === "removed" ? h("span", { class: "tag bad" }, "removed") : null,
+        r.tier_from === "ledger" ? h("span", { class: "tag" }, "curated") : null,
+        h("button", { class: "btn ghost", style: "margin-left:auto;padding:5px", title: "Close (Esc)", onclick: () => go(route.view) }, icon("x"))),
+      h("h2", null, name),
+      h("div", { class: "meta" },
+        h("span", null, h("b", null, span(r.born, r.last)), r.born ? " · " + duration(r.born, r.last || r.born) : ""),
+        h("span", null, h("b", null, fmt(r.commits)), " commits"), h("span", null, h("b", null, fmt(r.n_files)), " files"),
+        h("span", null, "used by ", h("b", null, down.length), " · uses ", h("b", null, up.length))),
+      tabBar),
+    body);
+  const paint = { story: paintStory, files: paintFiles, links: paintLinks, curate: paintCurate }[drawerTab];
+  const done = paint(body, r);
+  body.scrollTop = keep;             // ticking a box re-renders; it must not jump to the top
+  await done;
+}
+function markRows() {
+  for (const tr of document.querySelectorAll("tr.row")) tr.classList.toggle("sel", !!route.entry && tr.firstChild.textContent.startsWith(route.entry));
+}
+
+function activityChart(name, tier) {
+  const tl = S.timeline, e = tl.entries[name];
+  const W = 540, H = 64;
+  const g = s("svg", { viewBox: `0 0 ${W} ${H + 16}`, style: "width:100%;display:block;margin:4px 0 18px" });
+  if (!e) return g;
+  const y0 = +tl.start.slice(0, 4), m0 = +tl.start.slice(5, 7) - 1;
+  const x = i => i / tl.months * W, cw = W / tl.months;
+  for (let y = 0; y * 12 - m0 < tl.months; y++) {
+    const a = Math.max(0, y * 12 - m0);
+    g.append(s("line", { x1: x(a), x2: x(a), y1: 0, y2: H, stroke: "var(--line-2)" }));
+    if ((y0 + y) % 2 === 0) g.append(s("text", { x: x(a) + 2, y: H + 13, "font-size": 10, fill: "var(--faint)" }, String(y0 + y)));
+  }
+  for (const [a, b, t] of e.arcs) g.append(s("rect", { x: x(a), y: 0, width: Math.max(cw, x(b) - x(a) + cw), height: H, fill: tcol(tier), "fill-opacity": .08 },
+    s("title", {}, t || "")));
+  const mx = Math.max(1, ...e.act.map(p => p[1]));
+  for (const [m, n] of e.act) { const bh = Math.max(2, Math.sqrt(n / mx) * (H - 4));
+    g.append(s("rect", { x: x(m), y: H - bh, width: Math.max(1.2, cw - .4), height: bh, fill: tcol(tier), rx: .5 }, s("title", {}, n + " commits"))); }
+  g.append(s("line", { x1: 0, x2: W, y1: H, y2: H, stroke: "var(--line)" }));
+  return g;
+}
+
+async function paintStory(body, r) {
+  body.append(h("div", { class: "summary" }, r.summary || r.definition || h("span", { class: "muted" }, "No description yet.")));
+  body.append(activityChart(r.name, r.tier));
+  const box = h("div", { class: "story" }, h("div", { class: "skel" }), h("div", { class: "skel", style: "width:70%" }));
+  body.append(box);
+  let st = storyCache.get(r.name);
+  if (!st) { st = await (await fetch("/api/story?entry=" + encodeURIComponent(r.name))).json(); storyCache.set(r.name, st); }
+  if (drawerFor !== r.name || drawerTab !== "story") return;
+  box.replaceChildren();
+  if (st.authors && st.authors.length) body.insertBefore(h("div", { class: "authors" }, "Mostly by ",
+    st.authors.slice(0, 3).map((a, i) => [i ? ", " : "", h("b", null, a.name), " (" + a.n + ")"])), box);
+  if (!st.chapters || !st.chapters.length) {
+    box.append(h("div", { class: "explain" }, "This entry has not been narrated yet. Run ", h("span", { class: "mono" }, "gitchronicle update --chronicle"), "."));
+    return;
+  }
+  let yr = null;
+  for (const c of st.chapters) {
+    const y = c.start.slice(0, 4);
+    if (y !== yr) { box.append(h("div", { class: "yearmark" }, y)); yr = y; }
+    box.append(h("div", { class: "ch", style: "--tc:" + tcol(r.tier) },
+      h("span", { class: "pt" }),
+      h("h4", null, c.title || "(untitled)"),
+      h("div", { class: "when" }, span(c.start, c.end) + " · " + c.n + " commit" + (c.n === 1 ? "" : "s")
+        + (c.n > 1 ? " · " + duration(c.start, c.end) : "")),
+      c.narrative ? h("p", null, c.narrative) : null,
+      c.commits.length ? h("details", null, h("summary", null, "▸ " + c.commits.length + " commit" + (c.commits.length === 1 ? "" : "s")),
+        h("div", { class: "cm" }, c.commits.map(m => [h("span", { class: "h" }, m.hash.slice(0, 8)), h("span", { class: "dt" }, m.date),
+          h("span", { class: "sj", title: m.subject + " — " + m.author }, m.subject)]))) : null));
+  }
+}
+
+// ---- files: the territory as a tree, and the place an entry is split apart
+function buildTree(paths) {
+  const root = { name: "", path: "", kids: new Map(), n: 0, file: false };
+  for (const p of paths) {
+    let cur = root; cur.n++;
+    const parts = p.split("/");
+    parts.forEach((part, i) => {
+      const path = parts.slice(0, i + 1).join("/");
+      if (!cur.kids.has(part)) cur.kids.set(part, { name: part, path, kids: new Map(), n: 0, file: i === parts.length - 1 });
+      cur = cur.kids.get(part); cur.n++;
+    });
+  }
+  // a directory with a single child directory is one step, not two
+  const squash = node => {
+    for (const k of [...node.kids.keys()]) {
+      let c = node.kids.get(k);
+      while (!c.file && c.kids.size === 1 && !([...c.kids.values()][0].file)) {
+        const only = [...c.kids.values()][0];
+        c = { ...only, name: c.name + "/" + only.name };
+      }
+      node.kids.set(k, c); squash(c);
+    }
+  };
+  squash(root);
+  return root;
+}
+const openDirs = new Set();
+const picked = new Map();          // path -> node, the rows ticked in the Files tab
+let pickedFor = null;
+function paintFiles(body, r) {
+  if (pickedFor !== r.name) { picked.clear(); pickedFor = r.name; }
+  body.append(h("div", { class: "explain" },
+    h("b", null, "Sort this entry's files into the entries they really belong to. "),
+    "Tick folders or files, then ", h("b", null, "assign"), " them to an entry — an existing one or a new name — or ",
+    h("b", null, "remove"), " them when they were never part of anything here. Each assignment becomes a rule, and the commits and story follow the files on the next rebuild."));
+  const mine = pendingMoves.filter(m => m.from === r.name);
+  if (mine.length) {
+    const byTo = {};
+    for (const m of mine) (byTo[m.to || ""] = byTo[m.to || ""] || []).push(m);
+    body.append(h("div", { class: "card", style: "padding:10px 14px;margin-top:12px;font-size:12.5px" },
+      h("b", null, "Unsaved in this entry"), Object.entries(byTo).map(([to, ms]) => h("div", { style: "margin-top:4px" },
+        to ? h("span", { class: "tag ok" }, "→ " + to) : h("span", { class: "tag warn" }, "removed"), " ",
+        fmt(ms.reduce((t, m) => t + m.n, 0)) + " files: ", h("span", { class: "mono muted" }, ms.map(m => m.path).join(", "))))));
+  }
+  if (!r.files.length) { body.append(h("div", { class: "empty" }, "No files.")); return; }
+
+  const bar = h("div", { class: "pickbar" });
+  body.append(bar);
+  const tree = buildTree(r.files);
+  const box = h("div", { class: "tree" });
+  const max = tree.n;
+  const pend = p => pendingMoves.find(m => m.from === r.name && (p === m.path || p.startsWith(m.path + "/")));
+  const under = p => [...picked.keys()].some(q => q !== p && p.startsWith(q + "/"));
+  const row = (node, depth) => {
+    const isDir = !node.file;
+    const key = r.name + "::" + node.path;
+    const open = openDirs.has(key) || (depth === 0 && tree.kids.size <= 2);
+    const pm = pend(node.path);
+    const inherited = under(node.path);
+    const cb = h("input", { type: "checkbox", class: "ck", checked: picked.has(node.path) || inherited, disabled: !!pm || inherited });
+    cb.addEventListener("change", () => {
+      if (cb.checked) { for (const q of [...picked.keys()]) if (q.startsWith(node.path + "/")) picked.delete(q); picked.set(node.path, node); }
+      else picked.delete(node.path);
+      drawer(r.name);
+    });
+    const el = h("div", { class: "tr " + (isDir ? "dir" : "file") + (pm ? " gone" : "") + (picked.has(node.path) ? " picked" : ""),
+                          style: "padding-left:" + (4 + depth * 16) + "px" },
+      h("span", { class: "tw", onclick: () => isDir && toggle() }, isDir ? (open ? "▾" : "▸") : ""), cb,
+      h("span", { class: "nm", title: node.path, onclick: () => isDir ? toggle() : cb.click() }, node.name + (isDir ? "/" : "")),
+      isDir ? h("span", { class: "bar", style: "--tc:" + tcol(r.tier) + ";width:" + Math.max(3, node.n / max * 90) + "px" }) : null,
+      pm ? h("span", { class: "tag " + (pm.to ? "ok" : "warn") }, pm.to ? "→ " + pm.to : "removed") : null,
+      h("span", { class: "n" }, isDir ? fmt(node.n) : ""));
+    const toggle = () => { open ? openDirs.delete(key) : openDirs.add(key); drawer(r.name); };
+    box.append(el);
+    if (isDir && open) {
+      const kids = [...node.kids.values()].sort((a, b) => (a.file - b.file) || b.n - a.n || a.name.localeCompare(b.name));
+      kids.slice(0, 300).forEach(k => row(k, depth + 1));
+    }
+  };
+  [...tree.kids.values()].sort((a, b) => b.n - a.n).forEach(k => row(k, 0));
+  body.append(box);
+  paintPickBar(bar, r);
+}
+
+function paintPickBar(bar, r) {
+  if (!picked.size) {
+    bar.className = "pickbar idle";
+    bar.replaceChildren(h("span", null, "Tick folders or files to sort them."));
+    return;
+  }
+  const nodes = [...picked.values()];
+  const n = nodes.reduce((t, x) => t + (x.file ? 1 : x.n), 0);
+  const name = h("input", { class: "field", list: "entrynames", placeholder: "Assign to entry — existing or new", style: "flex:1;min-width:200px" });
+  const tier = h("select", { class: "field" }, SETTABLE.map(t => new Option(TIER_LABEL[t], t)));
+  tier.value = r.tier === "inherited" ? "feature" : r.tier;
+  const hint = h("div", { class: "hint", style: "width:100%;margin:0" });
+  const judge = () => { const j = judgeName(name.value, r.name); hint.className = "hint " + j.cls; hint.textContent = j.text;
+    if (j.tier) tier.value = j.tier; tier.disabled = !!j.tier; };
+  name.addEventListener("input", judge);
+  name.addEventListener("keydown", e => { if (e.key === "Enter") assign.click(); });
+  const assign = h("button", { class: "btn pri", onclick: async () => {
+    const v = name.value.trim();
+    if (!v) { hint.className = "hint err"; hint.textContent = "Name the entry these files belong to."; name.focus(); return; }
+    if (v === r.name) { hint.className = "hint err"; hint.textContent = "They already belong to it."; return; }
+    await decompose(r.name, nodes, v, byName.has(v) || pendingNames().includes(v) ? null : tier.value);
+  } }, "Assign");
+  bar.className = "pickbar";
+  bar.replaceChildren(
+    h("div", { style: "display:flex;align-items:center;gap:8px;width:100%" },
+      h("b", null, picked.size + " selected"), h("span", { class: "muted" }, "· " + fmt(n) + " file" + (n === 1 ? "" : "s")),
+      h("button", { class: "btn ghost", style: "margin-left:auto", onclick: () => { picked.clear(); drawer(r.name); } }, "Clear")),
+    name, tier, assign,
+    h("button", { class: "btn bad", title: "Take them out of this entry without giving them to another", onclick: () => decompose(r.name, nodes, null) }, "Remove"),
+    hint);
+  name.focus();
+}
+
+// Naming is where curation goes wrong silently: "Luna" next to "Luna Scripting System"
+// does not extend it, it carves a new entry out of it; "ccc" beside "CCC" is two products.
+function judgeName(v, self) {
+  v = v.trim();
+  if (!v) return { cls: "", text: "" };
+  const exact = byName.get(v);
+  if (exact) return { cls: "ok", text: "↳ joins the existing entry “" + v + "” (" + fmt(exact.n_files) + " files, " + exact.tier + ")", tier: exact.tier };
+  const pending = pendingNames();
+  if (pending.includes(v)) return { cls: "ok", text: "↳ joins “" + v + "”, which your rules declare" };
+  const all = [...byName.keys(), ...pending].filter(n => n !== self);
+  const low = v.toLowerCase();
+  const same = all.find(n => n.toLowerCase() === low);
+  if (same) return { cls: "err", text: "⚠ “" + same + "” exists and differs only in capitalisation — this would make a second entry." };
+  const near = all.filter(n => n.toLowerCase().includes(low) || low.includes(n.toLowerCase()));
+  if (near.length) return { cls: "err", text: "⚠ New entry — close to " + near.slice(0, 3).map(n => "“" + n + "”").join(", ") + ". Pick the exact name to join one." };
+  return { cls: "", text: "+ creates a new entry “" + v + "”" };
+}
+
+async function decompose(from, nodes, to, newTier) {
+  const globs = nodes.map(n => n.file ? n.path : n.path + "/**");
+  // Both halves are written: the reject releases the files from this entry, and the claim
+  // gives them their new home — first matching rule wins, so a claim alone could lose to an
+  // earlier, broader one.
+  addToEntry(from, globs.map(g => "  reject " + g));
+  // `from` scopes the claim to this entry's files: the folder in its tree is not the
+  // folder in the repo, and Client-Files/** alone would take 1,345 files instead of 152
+  if (to) addToEntry(to, globs.map(g => "  claim  " + g + ' from "' + from + '"').concat(newTier ? ["  tier   " + newTier] : []));
+  for (const n of nodes) pendingMoves.push({ from, path: n.path, to, n: n.file ? 1 : n.n });
+  picked.clear();
+  await afterEdit();
+  drawer(from);
+  toast(to ? "Assigned to " + to + " — save to apply" : "Removed — save to apply");
+}
+
 function parsePlan(text) {
-  const lines = text.split("\n");
-  const blocks = [];
+  const lines = text.split("\n"), blocks = [];
   let cur = null;
   lines.forEach((raw, i) => {
-    const s = raw.split("#")[0].trim();
-    if (!s) return;
-    const verb = s.split(/\s+/)[0].toLowerCase();
-    const rest = s.slice(verb.length).trim();
+    const t = raw.split("#")[0].trim();
+    if (!t) return;
+    const verb = t.split(/\s+/)[0].toLowerCase(), rest = t.slice(verb.length).trim();
     if (verb === "entry") {
-      cur = { kind: "entry", name: rest.replace(/^["']|["']$/g, ""), from: i, to: i,
-              claims: [], rejects: [], tier: null };
+      cur = { kind: "entry", name: rest.replace(/^["']|["']$/g, ""), from: i, to: i, claims: [], rejects: [], tier: null, note: null };
       blocks.push(cur);
-    } else if (verb === "merge" || verb === "reject" && /^["']/.test(rest)
-               || verb === "keep-split") {
-      blocks.push({ kind: verb, text: s, from: i, to: i });
-      cur = null;
+    } else if (verb === "merge" || (verb === "reject" && /^["']/.test(rest)) || verb === "keep-split") {
+      const b = { kind: verb === "reject" ? "hide" : verb, text: t, from: i, to: i, arg: rest };
+      if (verb === "merge") { const m = rest.match(/["']([^"']*)["']\s*->\s*["']([^"']*)["']/); if (m) { b.src = m[1]; b.dst = m[2]; } }
+      if (verb === "reject") b.name = rest.replace(/^["']|["']$/g, "");
+      blocks.push(b); cur = null;
     } else if (cur) {
       cur.to = i;
       if (verb === "claim") cur.claims.push(rest);
       else if (verb === "reject") cur.rejects.push(rest);
       else if (verb === "tier") cur.tier = rest;
+      else if (verb === "note") cur.note = rest;
     }
   });
   return blocks;
 }
+function pendingNames() { return parsePlan(planText).filter(b => b.kind === "entry").map(b => b.name); }
 
-function spliceLines(from, to) {
-  const lines = planText.split("\n");
-  lines.splice(from, to - from + 1);
-  planText = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+function addToEntry(name, lines) {
+  // extend the entry's existing block rather than opening a second one: repeated blocks do
+  // combine, but a plan that says "CCC" in four places is one nobody can read
+  const b = parsePlan(planText).find(x => x.kind === "entry" && x.name === name);
+  const all = planText.split("\n");
+  if (b) {
+    const have = new Set(all.slice(b.from, b.to + 1).map(l => l.trim().replace(/\s+/g, " ")));
+    let add = lines.filter(l => !have.has(l.trim().replace(/\s+/g, " ")));
+    if (add.some(l => /^\s*tier\s/.test(l))) {
+      for (let i = b.to; i > b.from; i--) if (/^\s*tier\s/.test(all[i])) { all.splice(i, 1); b.to--; }
+    }
+    all.splice(b.to + 1, 0, ...add);
+    planText = all.join("\n");
+  } else {
+    planText = planText.replace(/\s*$/, "") + "\n\nentry \"" + name + "\"\n" + lines.join("\n") + "\n";
+  }
   dirty++;
 }
-
-function renderRules() {
-  const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", "Rules"));
-  m.append(el("div", "sub", "This file IS your curation — it is replayed from scratch on "
-    + "every run, so changing a rule's text is how you change what it did, and deleting a "
-    + "rule undoes it completely. There is nothing else to unwind."));
-
-  const blocks = parsePlan(planText);
-  const dup = {};
-  for (const b of blocks) if (b.kind === "entry") dup[b.name] = (dup[b.name] || 0) + 1;
-
-  const list = el("div");
+function tidyPlan() {
+  // fold repeated `entry` blocks into the first one, keeping every line and comment
+  const lines = planText.split("\n");
+  const blocks = parsePlan(planText).filter(b => b.kind === "entry");
+  const first = new Map(), extra = new Map(), drop = new Set();
   for (const b of blocks) {
-    const c = el("div", "card");
-    if (b.kind === "entry") {
-      c.append(el("h3", "", b.name));
-      if (dup[b.name] > 1)
-        c.append(el("div", "sub err", "⚠ “" + b.name + "” is declared " + dup[b.name]
-          + " times — the blocks COMBINE into one entry. Delete one to separate them."));
-      const f = el("div", "facts");
-      f.textContent = (b.tier ? b.tier + " · " : "")
-        + b.claims.length + " claim" + (b.claims.length === 1 ? "" : "s")
-        + (b.rejects.length ? " · " + b.rejects.length + " reject" : "");
-      c.append(f);
-      for (const g of b.claims) c.append(el("div", "mono", "claim  " + g));
-      for (const g of b.rejects) c.append(el("div", "mono", "reject " + g));
-    } else {
-      c.append(el("div", "mono", b.text));
+    if (!first.has(b.name)) { first.set(b.name, b); continue; }
+    const body = lines.slice(b.from + 1, b.to + 1);
+    extra.set(b.name, (extra.get(b.name) || []).concat(body));
+    for (let i = b.from; i <= b.to; i++) drop.add(i);
+  }
+  if (!drop.size) return 0;
+  const out = [];
+  lines.forEach((l, i) => {
+    if (drop.has(i)) return;
+    out.push(l);
+    for (const [name, b] of first) if (b.to === i && extra.has(name)) {
+      const have = new Set(lines.slice(b.from, b.to + 1).map(x => x.trim().replace(/\s+/g, " ")));
+      let tierSeen = lines.slice(b.from, b.to + 1).some(x => /^\s*tier\s/.test(x));
+      for (const x of extra.get(name)) {
+        const k = x.trim().replace(/\s+/g, " ");
+        if (!k || have.has(k)) continue;
+        if (/^tier\s/.test(k)) { if (tierSeen) continue; tierSeen = true; }
+        have.add(k); out.push(x);
+      }
     }
-    const acts = el("div", "acts");
-    const ren = el("button", "s", "Rename");
-    const del = el("button", "s", "Delete");
-    if (b.kind === "entry") acts.append(ren);
-    acts.append(del);
-    c.append(acts);
-    ren.onclick = () => {
-      const inp = el("input");
-      inp.setAttribute("list", "entrynames");
-      inp.value = b.name;
-      const go = el("button", "p", "Rename");
-      acts.textContent = ""; acts.append(inp, go);
-      inp.focus(); inp.select();
-      go.onclick = () => {
-        const lines = planText.split("\n");
-        lines[b.from] = lines[b.from].replace(/".*"|'.*'/, '"' + inp.value.trim() + '"');
-        planText = lines.join("\n"); dirty++; render();
-      };
-    };
-    del.onclick = () => { spliceLines(b.from, b.to); render(); };
-    list.append(c);
-  }
-  if (!blocks.length) list.append(el("p", "sub", "No rules yet."));
-  m.append(list);
-
-  const d = el("details");
-  d.append(el("summary", "", "edit as text"));
-  const ta = el("textarea"); ta.value = planText;
-  ta.oninput = () => { planText = ta.value; dirty++; setStatus(); };
-  d.append(ta); m.append(d);
-  const pv = el("div"); pv.id = "pv"; m.append(pv);
-}
-
-async function doPreview() {
-  const r = await (await fetch("/api/preview", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (view !== "rules") { view = "rules"; setNav(); render(); }
-  if (r.error) { setStatus(r.error, "err"); return; }
-  if (r.trees) S.trees = r.trees;
-  setStatus(r.report.moved + " files move · " + r.report.claimed + " newly claimed · "
-    + r.report.merges + " merges", "ok");
-  const pv = $("pv"); if (!pv) return;
-  pv.textContent = "";
-  if (r.warnings && r.warnings.length) {
-    pv.append(el("h2", "", "Check these first"));
-    for (const w of r.warnings) pv.append(el("div", "sub err", "⚠ " + w));
-  }
-  if (!r.moves.length) { pv.append(el("p", "sub", "No file would change owner.")); return; }
-  pv.append(el("h2", "", "What would change"));
-  const tb = el("table"); const hr = el("tr");
-  ["entry", "now", "after", ""].forEach((h, i) =>
-    hr.append(el("th", i ? "num" : "", h)));
-  tb.append(hr);
-  for (const mv of r.moves) {
-    const tr = el("tr");
-    tr.append(el("td", "", mv.name), el("td", "num", String(mv.before)),
-              el("td", "num", String(mv.after)),
-              el("td", "", mv.new ? "new entry" : mv.gone ? "removed"
-                 : (mv.after > mv.before ? "+" : "") + (mv.after - mv.before)));
-    tb.append(tr);
-  }
-  pv.append(tb);
-}
-
-async function doSave() {
-  const r = await (await fetch("/api/save", { method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: planText }) })).json();
-  if (r.error) { setStatus(r.error, "err"); return; }
-  dirty = 0;
-  setStatus("Saved to " + r.saved + " — now run:  gitchronicle update", "ok");
-}
-
-
-// ---------- Map: a layered node-link graph ------------------------------------------
-// Tiers ARE the layers, foundations at the bottom, and an edge always points downward to
-// the thing it is built on. Within a layer nodes are ordered by the barycentre of their
-// neighbours and relaxed a few times — the standard trick for cutting edge crossings, and
-// the difference between a readable map and a hairball.
-const TIER_ORDER = ["feature", "tooling", "content", "framework", "foundation"];
-let sel = null, showAll = false;
-
-const SVGNS = "http://www.w3.org/2000/svg";
-function sv(tag, attrs) {
-  const e = document.createElementNS(SVGNS, tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]);
-  return e;
-}
-
-function crossings(order, layers, edges) {
-  const idx = new Map();
-  for (const t of layers) order.get(t).forEach((n, i) => idx.set(n, i));
-  let tot = 0;
-  for (let i = 0; i < layers.length - 1; i++) {
-    const A = new Set(order.get(layers[i])), B = new Set(order.get(layers[i + 1]));
-    const es = [];
-    for (const e of edges) {
-      if (A.has(e.src) && B.has(e.dst)) es.push([idx.get(e.src), idx.get(e.dst)]);
-      else if (B.has(e.src) && A.has(e.dst)) es.push([idx.get(e.dst), idx.get(e.src)]);
-    }
-    for (let a = 0; a < es.length; a++)
-      for (let b = a + 1; b < es.length; b++)
-        if ((es[a][0] - es[b][0]) * (es[a][1] - es[b][1]) < 0) tot++;
-  }
-  return tot;
-}
-
-function layout(nodes, edges, W, rowH) {
-  const layers = TIER_ORDER.filter(t => nodes.some(n => n.tier === t));
-  const order = new Map(layers.map(t =>
-    [t, nodes.filter(n => n.tier === t).map(n => n.name).sort()]));
-  const nbr = new Map(nodes.map(n => [n.name, []]));
-  for (const e of edges)
-    if (nbr.has(e.src) && nbr.has(e.dst)) {
-      nbr.get(e.src).push(e.dst); nbr.get(e.dst).push(e.src);
-    }
-
-  // Alternating down/up sweeps, keeping the best arrangement seen. Relaxing every layer
-  // at once against all its neighbours was tried and does not converge — it left MORE
-  // crossings than alphabetical order (85 vs 81). Sweeping against one fixed neighbour
-  // layer at a time takes this graph from 128 crossings to 31.
-  let best = new Map([...order].map(([k, v]) => [k, v.slice()]));
-  let bestC = crossings(order, layers, edges);
-  for (let sweep = 0; sweep < 8; sweep++) {
-    const down = sweep % 2 === 0;
-    const seq = down ? [...layers.keys()].slice(1) : [...layers.keys()].slice(0, -1).reverse();
-    for (const li of seq) {
-      const fixed = order.get(layers[li + (down ? -1 : 1)]);
-      const pos = new Map(fixed.map((n, i) => [n, i]));
-      const bary = new Map(order.get(layers[li]).map(n => {
-        const ns = nbr.get(n).filter(m => pos.has(m));
-        return [n, ns.length ? ns.reduce((a, m) => a + pos.get(m), 0) / ns.length : 1e9];
-      }));
-      order.get(layers[li]).sort((a, b) => bary.get(a) - bary.get(b) || a.localeCompare(b));
-    }
-    const c = crossings(order, layers, edges);
-    if (c < bestC) { bestC = c; best = new Map([...order].map(([k, v]) => [k, v.slice()])); }
-  }
-
-  const byName = new Map(nodes.map(n => [n.name, n]));
-  const pos = new Map();
-  layers.forEach((t, li) => {
-    const row = best.get(t);
-    const step = W / (row.length + 1);
-    row.forEach((name, i) => pos.set(name,
-      { x: step * (i + 1), y: 46 + li * rowH, tier: t, n: byName.get(name) }));
   });
-  return { pos, layers, crossings: bestC };
+  planText = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  dirty++;
+  return drop.size;
+}
+function addLine(text) { planText = planText.replace(/\s*$/, "") + "\n\n" + text + "\n"; dirty++; }
+
+function paintLinks(body, r) {
+  const up = (uses.get(r.name) || []).slice().sort(), down = (usedBy.get(r.name) || []).slice().sort();
+  const lk = n => { const c = byName.get(n); return h("div", { class: "lk", onclick: () => openEntry(n) }, dotEl(c && c.tier), n); };
+  body.append(h("div", { class: "links" },
+    h("div", null, h("h4", null, "Uses · " + up.length), up.length ? up.map(lk) : h("div", { class: "muted" }, "Nothing it imports is catalogued.")),
+    h("div", null, h("h4", null, "Used by · " + down.length), down.length ? down.map(lk) : h("div", { class: "muted" }, "Nothing depends on it."))));
+  body.append(h("div", { class: "hint", style: "margin-top:18px" }, "A link means code in one entry imports or includes a file owned by the other."));
+  if (up.length + down.length) body.append(h("button", { class: "btn", style: "margin-top:12px", onclick: () => go("graph", r.name) }, "Show in graph"));
 }
 
-function renderMap() {
-  const m = $("main"); m.textContent = "";
-  const deg = new Map();
-  for (const e of S.edges) {
-    if (!deg.has(e.src)) deg.set(e.src, { up: [], down: [] });
-    if (!deg.has(e.dst)) deg.set(e.dst, { up: [], down: [] });
-    deg.get(e.src).up.push(e.dst);      // src USES dst -> dst sits below
-    deg.get(e.dst).down.push(e.src);
+function paintCurate(body, r) {
+  const declared = r.declared;
+  const tier = h("select", { class: "field" }, SETTABLE.map(t => new Option(TIER_LABEL[t] + " — " + TIER_HELP[t], t)));
+  tier.value = r.tier;
+  const nm = h("input", { class: "field", value: r.name, style: "flex:1;min-width:220px" });
+  const into = h("input", { class: "field", list: "entrynames", placeholder: "Entry to merge into", style: "flex:1;min-width:220px" });
+  const intoHint = h("div", { class: "hint" });
+  into.addEventListener("input", () => { const j = judgeName(into.value, r.name); intoHint.className = "hint " + j.cls; intoHint.textContent = j.text; });
+  const note = h("input", { class: "field", placeholder: "Your own words about it", style: "flex:1;min-width:220px",
+    value: (parsePlan(planText).find(b => b.kind === "entry" && b.name === r.name) || {}).note || "" });
+  const done = async msg => { await afterEdit(); toast(msg); drawer(r.name); };
+  body.append(
+    h("div", { class: "act" }, h("h4", null, "Tier"), h("p", null, "What kind of thing this is. " + (r.tier_from === "ledger" ? "You set this." : "The tool guessed it from how widely it is used.")),
+      h("div", { class: "row" }, tier, h("button", { class: "btn", onclick: () => { if (tier.value === r.tier) return;
+        addToEntry(r.name, ["  tier   " + tier.value]); done("Tier → " + tier.value); } }, "Set tier"))),
+    h("div", { class: "act" }, h("h4", null, "Rename"), h("p", null, declared ? "Renames the entry in your rules." : "Recorded as a merge into the new name, so it survives the next rebuild."),
+      h("div", { class: "row" }, nm, h("button", { class: "btn", onclick: () => {
+        const v = nm.value.trim(); if (!v || v === r.name) return;
+        // every mention moves with it: its blocks, merges into it, scoped claims from it
+        if (declared) planText = planText.split("\n").map(l => l.split('"' + r.name + '"').join('"' + v + '"')).join("\n");
+        else addLine('merge  "' + r.name + '" -> "' + v + '"');
+        dirty++; done("Renamed to " + v); } }, "Rename"))),
+    h("div", { class: "act" }, h("h4", null, "Merge into another entry"), h("p", null, "Its files, commits and story join the other entry."),
+      h("div", { class: "row" }, into, h("button", { class: "btn", onclick: () => {
+        const v = into.value.trim(); if (!v || v === r.name) return;
+        addLine('merge  "' + r.name + '" -> "' + v + '"'); done("Merged into " + v); } }, "Merge")), intoHint),
+    h("div", { class: "act" }, h("h4", null, "Note"), h("p", null, "Kept with the entry in the knowledge base."),
+      h("div", { class: "row" }, note, h("button", { class: "btn", onclick: () => {
+        const v = note.value.trim(); if (!v) return;
+        const b = parsePlan(planText).find(x => x.kind === "entry" && x.name === r.name);
+        if (b && b.note != null) { const all = planText.split("\n"); for (let i = b.from; i <= b.to; i++) if (/^\s*note\s/.test(all[i])) all[i] = "  note   " + v; planText = all.join("\n"); dirty++; }
+        else addToEntry(r.name, ["  note   " + v]);
+        done("Note saved to rules"); } }, "Save note"))),
+    h("div", { class: "act", style: "border:0" }, h("h4", null, "Hide"), h("p", null, "Not a real thing — never propose it again. Its files go back to the pool."),
+      h("div", { class: "row" }, h("button", { class: "btn bad", onclick: () => { addLine('reject "' + r.name + '"'); done("Hidden: " + r.name); } }, "Hide this entry"))));
+}
+
+// =========================================================================================
+// REVIEW
+// =========================================================================================
+function renderReview(main) {
+  const page = h("div", { class: "page", style: "max-width:980px" });
+  const open = S.trees.filter(t => !t.handled), done = S.trees.filter(t => t.handled);
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Review"),
+    h("p", null, "Folders the catalogue split across several entries, most suspicious first: no entry owns most of it, "
+      + "and nothing is named after it. If the files are one thing you built, make them one entry; if they are different "
+      + "things that share a folder, mark it as correctly split."))));
+  if (!open.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  for (const t of open.slice(0, 40)) page.append(reviewCard(t));
+  if (done.length) page.append(h("details", { style: "margin-top:20px" },
+    h("summary", { class: "muted", style: "cursor:pointer" }, done.length + " folders already answered by a rule"),
+    h("div", { class: "card", style: "margin-top:10px" }, done.map(t => h("div", { class: "rule" },
+      h("div", { class: "body" }, h("span", { class: "mono" }, t.dir), h("span", { class: "muted" }, "  →  " + t.handled)))))));
+  main.append(page);
+}
+function reviewCard(t) {
+  const c = h("div", { class: "card rv" });
+  const acts = h("div", { class: "acts" });
+  const top = t.holders[0] ? t.holders[0][1] : 1;
+  c.append(h("h3", null, t.dir + "/"),
+    h("div", { class: "facts" }, h("span", null, fmt(t.files) + " files"), h("span", null, "split " + t.entries + " ways"),
+      h("span", null, "largest share " + Math.round(t.top_share * 100) + "%"), t.unnamed ? h("span", { class: "tag warn" }, "no entry named after it") : null),
+    h("div", { class: "cols" },
+      h("div", null, h("h4", null, "What is in it"), t.samples.map(x => h("div", { class: "mono muted", style: "padding:1px 0" }, x))),
+      h("div", null, h("h4", null, "Currently filed under"), t.holders.map(([n, k]) => h("div", { class: "hold" },
+        h("a", { onclick: () => openEntry(n) }, n), h("div", { class: "b", style: "width:" + Math.max(4, k / top * 70) + "px" }), h("span", { class: "num muted" }, k))))),
+    acts);
+  const reset = () => acts.replaceChildren(
+    h("button", { class: "btn pri", onclick: one }, "These are one thing…"),
+    h("button", { class: "btn", onclick: async () => { addLine("keep-split " + t.dir + "/**"); await afterEdit(); finish("Marked as correctly split"); } }, "Correctly split"));
+  const finish = msg => { c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ " + msg)); };
+  function one() {
+    const name = h("input", { class: "field", list: "entrynames", value: t.top, style: "min-width:260px" });
+    const tier = h("select", { class: "field" }, SETTABLE.map(x => new Option(TIER_LABEL[x], x)));
+    tier.value = "tooling";
+    const hint = h("div", { class: "hint", style: "width:100%" });
+    const judge = () => { const j = judgeName(name.value); hint.className = "hint " + j.cls; hint.textContent = j.text; if (j.tier) tier.value = j.tier; };
+    name.addEventListener("input", judge);
+    acts.replaceChildren(h("span", { class: "muted" }, "Belongs to"), name, tier,
+      h("button", { class: "btn pri", onclick: async () => {
+        const v = name.value.trim(); if (!v) { hint.className = "hint err"; hint.textContent = "Name it first."; return; }
+        addToEntry(v, ["  claim  " + t.dir + "/**", "  tier   " + tier.value]); await afterEdit(); finish("Claimed by " + v); } }, "Add rule"),
+      h("button", { class: "btn ghost", onclick: reset }, "Cancel"), hint);
+    judge(); name.focus(); name.select();
   }
-  let nodes = S.catalogue.filter(r => deg.has(r.name));
-  let edges = S.edges;
-  if (sel && !showAll) {
-    const keep = new Set([sel, ...deg.get(sel).up, ...deg.get(sel).down]);
-    nodes = nodes.filter(n => keep.has(n.name));
-    edges = edges.filter(e => keep.has(e.src) && keep.has(e.dst));
-  }
+  reset();
+  return c;
+}
 
-  // lay out FIRST: the subtitle reports the crossing count, so it cannot be written
-  // before the layout that produces it
-  const W = 940, rowH = 118;
-  const { pos, layers, crossings: xs } = layout(nodes, edges, W, rowH);
-
-  m.append(el("h2", "", "The map"));
-  m.append(el("div", "sub", nodes.length + " entries, " + edges.length
-    + " import edges. An edge runs downward to the thing it is built on. "
-    + (sel ? "Showing " + sel + " and its neighbours." : "Click a node to focus it.")
-    + "  (" + xs + " crossings)"));
-
-  const row = el("div", "acts");
-  const b1 = el("button", "s", sel ? "clear focus" : "focus: none");
-  b1.onclick = () => { sel = null; render(); };
-  const b2 = el("button", "s", showAll ? "focused view" : "keep whole graph");
-  b2.onclick = () => { showAll = !showAll; render(); };
-  row.append(b1); if (sel) row.append(b2);
-  m.append(row);
-
-  const H = 60 + layers.length * rowH;
-  const svg = sv("svg", { viewBox: `0 0 ${W + 40} ${H}`, width: "100%", height: H,
-                          style: "overflow:visible" });
-
-  layers.forEach((t, li) => {
-    const y = 46 + li * rowH;
-    svg.append(sv("line", { x1: 0, y1: y, x2: W + 30, y2: y, stroke: "var(--line)",
-                            "stroke-width": 1 }));
-    const lab = sv("text", { x: 0, y: y - 12, fill: "var(--muted)", "font-size": 10.5,
-                             "letter-spacing": "0.07em" });
-    lab.textContent = t.toUpperCase();
-    svg.append(lab);
-  });
-
-  const rel = sel ? deg.get(sel) : null;
-  for (const e of edges) {
-    const a = pos.get(e.src), b = pos.get(e.dst);
-    if (!a || !b) continue;
-    const hot = sel && (e.src === sel || e.dst === sel);
-    const mid = (a.y + b.y) / 2;
-    svg.append(sv("path", {
-      d: `M${a.x},${a.y} C${a.x},${mid} ${b.x},${mid} ${b.x},${b.y}`,
-      fill: "none", stroke: hot ? "var(--t-" + b.tier + ")" : "var(--fg)",
-      "stroke-width": hot ? 1.6 : 0.8,
-      "stroke-opacity": sel ? (hot ? 0.85 : 0.06) : 0.16,
-    }));
-  }
-
-  for (const [name, p] of pos) {
-    const fan = p.n.fan_in || 0;
-    const r = Math.min(11, 3.5 + Math.sqrt(fan) * 2.2);
-    const focused = !sel || name === sel
-      || (rel && (rel.up.includes(name) || rel.down.includes(name)));
-    const g = sv("g", { style: "cursor:pointer" });
-    g.append(sv("circle", { cx: p.x, cy: p.y, r: r,
-      fill: "var(--t-" + p.tier + ")", stroke: "var(--bg)", "stroke-width": 2,
-      "fill-opacity": focused ? 1 : 0.25 }));
-    // every node is labelled: the palette warns on contrast at this surface, so identity
-    // must never rest on colour alone
-    if (fan >= 2 || name === sel || nodes.length <= 30 || focused && sel) {
-      const tx = sv("text", { x: p.x, y: p.y - r - 5, "text-anchor": "middle",
-        "font-size": 10, fill: "var(--fg)", "fill-opacity": focused ? 0.95 : 0.3 });
-      tx.textContent = name.length > 26 ? name.slice(0, 25) + "…" : name;
-      g.append(tx);
+// =========================================================================================
+// RULES
+// =========================================================================================
+function renderRules(main) {
+  const page = h("div", { class: "page", style: "max-width:980px" });
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Rules"),
+    h("p", null, "Your curation, stored in ", h("span", { class: "mono" }, S.plan_path), ". It is replayed from scratch on every rebuild, "
+      + "so there is no history to unwind: editing a rule changes what it does, deleting it undoes it completely."))));
+  const blocks = parsePlan(planText);
+  const groups = [["entry", "Entries"], ["merge", "Merges and renames"], ["hide", "Hidden"], ["keep-split", "Correctly split folders"]];
+  const dup = {}; for (const b of blocks) if (b.kind === "entry") dup[b.name] = (dup[b.name] || 0) + 1;
+  const nDup = Object.values(dup).filter(n => n > 1).length;
+  if (nDup) page.append(h("div", { class: "card pad", style: "display:flex;gap:14px;align-items:center;margin-bottom:8px" },
+    h("div", { style: "flex:1" }, h("b", null, nDup + " entries are declared in several places. "),
+      h("span", { class: "muted" }, "They already act as one; tidying folds each into a single block so the file reads that way too.")),
+    h("button", { class: "btn", onclick: () => { tidyPlan(); afterEdit().then(render); } }, "Tidy")));
+  if (!blocks.length) page.append(h("div", { class: "card pad empty" }, "No rules yet. Start in ", h("a", { onclick: () => go("review") }, "Review"),
+    " or open any entry and split it."));
+  for (const [kind, title] of groups) {
+    const bs = blocks.filter(b => b.kind === kind); if (!bs.length) continue;
+    page.append(h("div", { class: "rgroup" }, title + " · " + bs.length));
+    const card = h("div", { class: "card" });
+    for (const b of bs) {
+      const del = h("button", { class: "btn ghost", title: "Delete this rule", onclick: () => {
+        const all = planText.split("\n"); all.splice(b.from, b.to - b.from + 1);
+        planText = all.join("\n").replace(/\n{3,}/g, "\n\n"); dirty++; afterEdit().then(render); } }, icon("x"));
+      let bodyEl;
+      if (b.kind === "entry") {
+        const c = byName.get(b.name);
+        bodyEl = h("div", { class: "body" },
+          h("div", null, h("b", null, c ? h("a", { onclick: () => openEntry(b.name) }, b.name) : b.name),
+            b.tier ? h("span", { style: "margin-left:8px" }, tierPill(b.tier)) : null,
+            !c ? h("span", { class: "tag", style: "margin-left:8px" }, "new on rebuild") : null,
+            dup[b.name] > 1 ? h("span", { class: "tag warn", style: "margin-left:8px" }, "declared " + dup[b.name] + "× — combines") : null),
+          h("div", { class: "lines" }, [...b.claims.map(g => "claim  " + g), ...b.rejects.map(g => "reject " + g), b.note ? "note   " + b.note : null]
+            .filter(Boolean).map(t => h("div", null, t))));
+      } else if (b.kind === "merge") {
+        bodyEl = h("div", { class: "body" }, h("b", null, b.src || b.arg), h("span", { class: "muted" }, "  →  "), h("b", null, b.dst || ""));
+      } else if (b.kind === "hide") {
+        bodyEl = h("div", { class: "body" }, h("b", null, b.name));
+      } else {
+        bodyEl = h("div", { class: "body" }, h("span", { class: "mono" }, b.arg));
+      }
+      card.append(h("div", { class: "rule" }, bodyEl, del));
     }
-    const ttl = sv("title");
-    ttl.textContent = `${name}\n${p.tier} · used by ${fan} · ${p.n.n_files} files`;
-    g.append(ttl);
-    g.onclick = () => { sel = (sel === name ? null : name); showAll = false; render(); };
-    svg.append(g);
+    page.append(card);
   }
-  m.append(svg);
+  const ta = h("textarea", { class: "plan", spellcheck: "false" });
+  ta.value = planText;
+  ta.addEventListener("input", () => { planText = ta.value; dirty++; dock(); });
+  page.append(h("details", { style: "margin-top:26px" }, h("summary", { class: "muted", style: "cursor:pointer;margin-bottom:10px" }, "Edit as text"), ta));
+  main.append(page);
+}
 
-  if (sel && rel) {
-    const d = el("div", "card");
-    d.append(el("h3", "", sel));
-    d.append(el("div", "sub", "uses (" + rel.up.length + "): " + (rel.up.join(", ") || "nothing")));
-    d.append(el("div", "sub", "used by (" + rel.down.length + "): " + (rel.down.join(", ") || "nothing")));
-    const acts = el("div", "acts");
-    const b = el("button", "s", "read its story →");
-    b.onclick = () => { storyFor = sel; view = "story"; setNav(); render(); };
-    acts.append(b); d.append(acts);
-    m.append(d);
+// =========================================================================================
+// DOCK — unsaved rules, preview, save, rebuild
+// =========================================================================================
+let rebuildState = null, pvOpen = false;
+async function afterEdit() {
+  const r = await preview();
+  if (r && r.trees) S.trees = r.trees;
+  index(); dock();
+  if (route.view === "review" || route.view === "rules") render();
+}
+async function preview() {
+  return (await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ plan: planText }) })).json();
+}
+function dock() {
+  const d = $("dock");
+  if (rebuildState && rebuildState.running) {
+    d.replaceChildren(h("span", { class: "spin" }), h("span", null, "Rebuilding the knowledge base" + (rebuildState.stage ? " — " + rebuildState.stage : "") + "…"));
+    d.classList.add("show"); return;
+  }
+  if (rebuildState && rebuildState.code != null && rebuildState.code !== 0) {
+    d.replaceChildren(h("span", null, "Rebuild failed (exit " + rebuildState.code + "): " + (rebuildState.tail || []).slice(-1)[0]),
+      h("button", { class: "btn", onclick: () => { rebuildState = null; dock(); } }, "Dismiss"));
+    d.classList.add("show"); return;
+  }
+  const changed = planText !== savedPlan;
+  if (changed) {
+    d.replaceChildren(h("span", { title: "Nothing changes until you save" + (S.can_rebuild ? " and rebuild" : "") }, h("b", null, "Unsaved rules")),
+      h("button", { class: "btn", onclick: togglePreview }, pvOpen ? "Hide preview" : "Preview"),
+      h("button", { class: "btn", onclick: () => { planText = savedPlan; dirty = 0; pendingMoves.length = 0; pvOpen = false; $("pvpop").classList.remove("show"); afterEdit().then(() => { render(); drawer(route.entry); }); } }, "Discard"),
+      h("button", { class: "btn pri", onclick: save }, S.can_rebuild ? "Save & rebuild" : "Save"));
+    d.classList.add("show");
+  } else d.classList.remove("show");
+}
+async function togglePreview() {
+  const p = $("pvpop");
+  pvOpen = !pvOpen; dock();
+  if (!pvOpen) { p.classList.remove("show"); return; }
+  const r = await preview();
+  p.replaceChildren();
+  if (r.error) { p.append(h("div", { class: "hint err" }, r.error)); p.classList.add("show"); return; }
+  p.append(h("h3", { style: "font-size:14px" }, "What the rebuild will change"),
+    h("div", { class: "hint" }, fmt(r.report.moved) + " files change owner · " + fmt(r.report.claimed) + " newly claimed · "
+      + fmt(r.report.released || 0) + " released · " + r.report.merges + " merges"));
+  for (const w of r.warnings || []) p.append(h("div", { class: "hint err" }, "⚠ " + w));
+  if (r.moves.length) p.append(h("table", null, r.moves.map(m => h("tr", null, h("td", null, m.name),
+    h("td", { class: "num muted", style: "text-align:right" }, fmt(m.before) + " → " + fmt(m.after)),
+    h("td", { style: "text-align:right" }, m.new ? h("span", { class: "tag ok" }, "new") : m.gone ? h("span", { class: "tag bad" }, "gone")
+      : h("span", { class: "num " + (m.after > m.before ? "" : "muted") }, (m.after > m.before ? "+" : "") + (m.after - m.before)))))));
+  else p.append(h("div", { class: "muted", style: "margin-top:8px" }, "No file changes owner (tiers, notes and names still apply)."));
+  p.classList.add("show");
+}
+function toast(msg) {
+  const t = h("div", { class: "card", style: "position:fixed;top:16px;right:16px;padding:10px 14px;z-index:70;font-size:13px;box-shadow:var(--shadow)" }, "✓ " + msg);
+  document.body.append(t); setTimeout(() => t.remove(), 2200);
+}
+async function save() {
+  const r = await (await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ plan: planText }) })).json();
+  if (r.error) { showErr(r.error); return; }
+  savedPlan = planText; dirty = 0; pvOpen = false; $("pvpop").classList.remove("show");
+  if (!S.can_rebuild) { toast("Saved — run  gitchronicle update  to rebuild"); dock(); return; }
+  await fetch("/api/rebuild", { method: "POST" });
+  pollRebuild();
+}
+async function pollRebuild() {
+  rebuildState = await (await fetch("/api/rebuild")).json();
+  dock();
+  if (rebuildState.running) { setTimeout(pollRebuild, 1500); return; }
+  if (rebuildState.code === 0) {
+    rebuildState = null; pendingMoves.length = 0; storyCache.clear(); G = null;
+    await load(); drawer(route.entry); toast("Knowledge base rebuilt");
   }
 }
 
-// ---------- Story -------------------------------------------------------------------
-let storyFor = null;
-
-async function renderStory() {
-  const m = $("main"); m.textContent = "";
-  m.append(el("h2", "", "Story"));
-  if (!S.chapters)
-    m.append(el("div", "sub err",
-      "No chapters yet — run  gitchronicle update --chronicle"));
-  const pick = el("input");
-  pick.setAttribute("list", "entrynames");
-  pick.placeholder = "entry name…";
-  pick.value = storyFor || "";
-  pick.style.margin = "8px 0";
-  m.append(pick);
-  const box = el("div"); m.append(box);
-  const draw = async () => {
-    const name = pick.value.trim();
-    if (!name) { box.textContent = ""; return; }
-    storyFor = name;
-    const s = await (await fetch("/api/story?entry=" + encodeURIComponent(name))).json();
-    box.textContent = "";
-    if (s.error) { box.append(el("div", "sub err", s.error)); return; }
-    box.append(el("div", "facts", s.tier + " · " + s.born + " → " + s.last + " · "
-      + s.commits + " commits"));
-    if (s.summary) box.append(el("p", "sub", s.summary));
-    if (!s.chapters.length) {
-      box.append(el("p", "sub", "Not narrated yet."));
-      return;
-    }
-    for (const c of s.chapters) {
-      const d = el("div", "chap");
-      d.append(el("b", "", c.title || "(untitled)"), " ",
-               el("span", "when", c.start + " → " + c.end));
-      if (c.narrative) d.append(el("p", "", c.narrative));
-      const row = el("div");
-      for (const h of c.commits.slice(0, 10))
-        row.append(el("span", "hash", h.slice(0, 10) + "  "));
-      d.append(row);
-      box.append(d);
-    }
-  };
-  pick.onchange = draw; pick.oninput = () => {};
-  if (storyFor) await draw();
-}
-
-const VIEWS = { review: renderReview, map: renderMap, story: renderStory, catalogue: renderCatalogue, rules: renderRules };
-function render() { $("how").innerHTML = HOW[view]; VIEWS[view](); setStatus(); }
-function setNav() {
-  $("bR").className = view === "review" ? "on" : "";
-  $("bG").className = view === "map" ? "on" : "";
-  $("bS").className = view === "story" ? "on" : "";
-  $("bC").className = view === "catalogue" ? "on" : "";
-  $("bL").className = view === "rules" ? "on" : "";
-}
-$("bR").onclick = () => { view = "review"; setNav(); render(); };
-$("bC").onclick = () => { view = "catalogue"; setNav(); render(); };
-$("bG").onclick = () => { view = "map"; setNav(); render(); };
-$("bS").onclick = () => { view = "story"; setNav(); render(); };
-$("bL").onclick = () => { view = "rules"; setNav(); render(); };
-$("bPrev").onclick = doPreview;
-$("bSave").onclick = doSave;
-load();
+const VIEWS = { ask: renderAsk, catalogue: renderCatalogue, graph: renderGraph, timeline: renderTimeline, review: renderReview, rules: renderRules };
+route = parseHash();
+load().then(async () => {
+  const d = $("drawer"); d.style.transition = "none";      // a reload lands open, it does not slide
+  await drawer(route.entry);
+  requestAnimationFrame(() => requestAnimationFrame(() => { d.style.transition = ""; })); fetch("/api/rebuild").then(r => r.json()).then(st => { if (st.running) pollRebuild(); }); });
 </script></body></html>
