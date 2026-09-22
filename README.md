@@ -15,7 +15,7 @@ to be?*
 
 ---
 
-## The architecture (v0.4): the tool proposes, the ledger decides
+## The architecture (since v0.4): the tool proposes, the ledger decides
 
 Three earlier versions each hard-coded a **grain** — how big one "feature" is — and each
 one was wrong in its own way, because the grain is the one thing that cannot be settled in
@@ -161,46 +161,65 @@ pip install -r requirements.txt
 pip install -e .            # installs the `gitchronicle` command
 ```
 
-Requirements: Python ≥ 3.11, `git` on PATH, an embedding backend, a chat LLM.
-
-```bash
-ollama pull bge-m3          # embeddings (multilingual, cheap, fine on CPU)
-# chat model: a cloud API key (recommended) or a local 14–32B on a GPU
-```
+Requirements: Python ≥ 3.11, `git` on PATH, and a chat LLM: any OpenAI-compatible API,
+Google Vertex (`pip install -e '.[vertex]'`), or a local 14–32B model through Ollama. No
+embedding server: search is SQLite full-text, in the project's own vocabulary.
 
 ## Quickstart
 
 ```bash
 cp config.example.toml config.toml     # edit: repo path, providers
 cp .env.example .env                   # provider API key
-gitchronicle update                    # ingest what's new -> KB + kb.html + dossiers
-gitchronicle update --chronicle        # ... and narrate each entry's evolution (LLM)
-gitchronicle studio                    # browse the catalogue, write rules, see the map
-gitchronicle ledger --draft            # (or seed a ledger from the catalogue, headless)
-gitchronicle check                     # health: temporal violations, dups, conflicts
+gitchronicle init                      # draft the scope (what is the product); review it
+gitchronicle update --chronicle        # ingest -> KB + narrated history (LLM)
+gitchronicle studio                    # ask, browse, curate — http://127.0.0.1:8765
+gitchronicle ask "how did the battle pass evolve?"
+gitchronicle mcp                       # the same knowledge base, for coding agents
 ```
 
-`update` is the command to schedule: ingest and untangle skip everything already seen, the
-assembly is deterministic and cheap, and the ledger means a rebuild cannot disturb your
-curation. It ends by reporting what changed — new entries, entries that grew, entries gone.
+Seven commands with `eval`; `--help` shows only these (the stage-by-stage commands of earlier versions
+still work, hidden). `update` is the one to schedule: ingest and untangle skip everything
+already seen, the assembly is deterministic and cheap, narration reuses every chapter
+already paid for, and the ledger means a rebuild cannot disturb your curation. It ends by
+reporting what changed. Without `--chronicle` it never buys narration: new or changed
+entries are listed as waiting for it.
 
 ### The studio
 
-`gitchronicle studio` serves a local page that leads with the diagnostic a terminal
-cannot: **which directories are split across many entries**. Fragmentation alone is the
-wrong signal — the folder holding all the server code is shared by fifty entries and that
-is correct — so it ranks directories that carry a name *no entry answers to*. That is the
-shape of a standalone thing the assembly dissolved into its neighbours: on the reference
-repo it surfaced a 400-file wiki tool smeared across fifteen game features.
+`gitchronicle studio` is a local web app with two halves.
 
-Each card shows the filenames and the current holders, because only those distinguish "one
-tool" from "a folder of unrelated features", and offers two answers: make it one entry, or
-record `keep-split` and stop being asked. Naming autocompletes against existing entries and
-warns when a new name would carve files out of one that already exists. **Map** draws the
-catalogue as a layered graph — tiers as layers, edges running down to what a thing is built
-on, ordered by alternating barycentre sweeps (128 crossings → 31 on the reference repo).
-**Story** shows an entry's arcs. Preview replays rules through the same code the real run
-uses and writes nothing until you save.
+**Explore.** *Ask* answers questions from the knowledge base with citations to entries and
+commits, and shows the matching entries, chapters and commits as you type. *Catalogue* is
+every entry with its tier, activity over time, size and dependents. *Graph* is the
+force-directed "uses" network: bigger nodes have more dependents, hovering lights up a
+node's neighbourhood. *Timeline* shows every entry's activity month by month with its
+chapters as bands; click a year to see what was worked on, first seen and removed. Any
+entry opens a panel with its narrated story, its files, its links and curation actions.
+
+**Curate.** *Review* ranks folders the catalogue split across entries when nothing is named
+after them, the shape of a standalone thing the assembly dissolved (on the reference repo,
+a 400-file wiki tool smeared across fifteen game features). *Rules* is the ledger, edited
+in place. In an entry's **Files** tab you sort its files by hand: tick folders or files and
+assign them to another entry, existing or new, or remove them. That is how a wrongly
+generated blob gets split, by your categorisation rather than a guess, and its commits and
+story follow the files on the next rebuild. Nothing is written until you save; *Save &
+rebuild* runs `update` and reloads.
+
+### Splitting and other rules
+
+```
+entry "Ganpeki Tasks"
+  reject Client-Files/**                               # give these back
+entry "Locale Strings"
+  claim  Client-Files/** from "Ganpeki Tasks"          # ... and take only Ganpeki's
+merge  "Mob Proto" -> "Monster Prototypes"             # rename (tier and notes follow)
+reject "Constinfo System"                              # never propose it again
+keep-split Client/UserInterface/**                     # shared on purpose; stop asking
+```
+
+`claim … from` matters: a folder in one entry's territory is not the folder in the repo.
+Without it, sorting Ganpeki's 152 locale files into a new entry would have claimed all
+1,345 files under `Client-Files/`.
 
 ### Direction (optional)
 
@@ -230,19 +249,35 @@ decomposing it.
   history territory), `commit_domains`, `domain_edges`, `evolution_chapters`,
   `concerns`, FTS5 indexes. Query it with any SQLite client.
 
-## The (optional) review seam
+## Agents: MCP
 
-The pipeline never blocks on a human. When you want to curate:
+`gitchronicle mcp` serves the knowledge base over the Model Context Protocol (stdio, no
+extra dependency), read-only. Register it once:
 
 ```bash
-gitchronicle taxonomy review --edit   # rebase-i style plan in $EDITOR:
-                                      #   accept | reject | lock | merge -> X | rename -> Y
-gitchronicle taxonomy list|show|merge|rename|reject|confirm|export|import
-gitchronicle run --frozen             # gated mode: exit 2 if changes await review
+claude mcp add chronicle -- gitchronicle mcp --config /abs/path/to/config.toml
 ```
 
-Rejecting tombstones a name forever; every applied verb becomes a golden-record
-annotation. Merges persist across re-runs.
+Four tools, all returning evidence rather than conclusions, because the agent does its own
+reasoning: `search` (entries, dated chapters, commits), `entry` (what it is, who built it,
+what it uses and what uses it, its full dated story), `path_history` (which entry owns a
+file or folder, and the commits that touched it; call it before changing code) and
+`period` (what happened in a year or date range).
+
+## Does it tell the truth? `gitchronicle eval`
+
+Structure metrics (blob size, territory, probes) never said whether an answer was right.
+`eval` asks questions whose answers you know and grades each answer fact by fact, quoting
+the words that state or contradict each fact, and scores contradictions separately from
+omissions: "the evidence doesn't cover it" beats an invented date.
+
+```json
+[{"q": "When was the battle pass first removed?", "facts": ["August 2021"]},
+ {"q": "When was VR support added?", "facts": ["there is none"], "unanswerable": true}]
+```
+
+`eval/` holds the question sets used below. Their facts come from `git log` and, for
+httpie, its CHANGELOG, never from the knowledge base itself.
 
 ## Choosing a model & provider
 
@@ -265,8 +300,8 @@ named it first (those answers are cached, so it costs nothing) while `chat` move
 for the expensive stages. Unset, it falls back to `chat`.
 
 Google Vertex is reachable with `kind = "vertex"`, authorised by Application Default
-Credentials rather than an API key; keep `[providers.embed]` on Ollama, since Vertex has no
-OpenAI-compatible embeddings endpoint.
+Credentials rather than an API key. (`[providers.embed]` is only read by the hidden legacy
+commands; Vertex has no OpenAI-compatible embeddings endpoint, so leave it off Vertex.)
 
 Any OpenAI-compatible endpoint works (or Ollama locally). Reference point: a
 ~6,500-commit, 35k-file game fork — full pipeline including narrated chronicles —
@@ -274,6 +309,11 @@ ran for roughly **$40–45** of small-model API cost end-to-end, iterations
 included; a single clean pass is a fraction of that.
 
 ## Status
+
+**v0.5 — the knowledge base answers.** Ask with citations, the same evidence served to
+coding agents over MCP, a studio rebuilt around exploring (graph, timeline) with manual
+splitting of wrongly generated entries, and `eval`, the first measure of whether answers
+are true. Built on v0.4:
 
 **v0.4 — "the tool proposes, the ledger decides."** Grain is no longer hard-coded: the
 pipeline proposes, and `gitchronicle.plan` overrides it with path rules that survive
@@ -296,12 +336,37 @@ Measured against v0.3 on the same 12-year, 6.5k-commit fork:
 Narrating all 779 chapters cost about **$0.50** on Gemini 2.5 Flash, and a rebuild that
 changes nothing now makes **zero** LLM calls.
 
+**Does it tell the truth?** Graded with `gitchronicle eval` (facts from `git log` and the
+CHANGELOG, never from the KB; the grader quotes the words behind each verdict):
+
+| | void-queue (16 q) | httpie (15 q, second repo, no tuning) |
+|---|---|---|
+| strict score | **78%** (was 34% before the fixes below) | **73%** (was 40%) |
+| answers with a contradiction | 3 | 4 |
+| unanswerable question refused | yes | yes |
+
+Reading the answers by hand, several "contradictions" are the grader being stricter than
+the facts: CCC's history really does start in 2021, and "built December 2021, shipped in
+3.0.0" is right for Bearer auth. The fixes the eval drove: whole-project facts in the
+evidence (it had answered "when did the project start?" from the oldest *narrated* entry,
+three years late); full chapter text for the leading entries (a 300-character cut had
+dropped the battle pass's 2021 removal); and releases, because commits say when work was
+done and a changelog says when it shipped.
+
+**Second repository.** httpie (1,797 commits, 12 years) ran end to end with an accepted
+default scope in 27 minutes. Q&A carries over; the decomposition does not yet: 49 entries,
+several named after code words (`init`, `json`, `processors`), a 175-commit "Test CLI"
+entry mixing tests, CLI and downloads, sessions split in two, only 2 dependency edges, and
+fork-aware "inherited baseline" entries on a repo that is not a fork. The pipeline's
+defaults were tuned on one repository and it shows.
+
 Honest limits. The assembly still re-partitions as history grows — 58–68% of
 feature-grade clusters keep their own evidence across two years — which is *why* curation
 lives in the ledger rather than the database, but it does mean un-curated entries drift
 between runs. Two of the three golden validation probes are too small to score and are
-reported rather than gated. Colour in the map is validated for colour-vision deficiency;
-the layout is checked by crossing count, not by eye.
+reported rather than gated (probes are now per-repo config, `[lineage.golden]`). A release
+is inferred as the first tag dated after a commit, which is wrong for work merged late
+(`--offline` was attributed to 2.1.0 instead of 2.0.0); tag ancestry would fix it.
 
 Two lessons are wired into the tool rather than left as advice. Feature names come from a
 model, so the naming role is pinned separately from `chat` — switching the chat model once

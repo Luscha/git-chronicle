@@ -94,7 +94,7 @@ def _main(version: bool = typer.Option(False, "--version", callback=_version_cb,
 
 
 # ---- pipeline stages --------------------------------------------------------
-@app.command()
+@app.command(hidden=True)
 def extract(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Ingest commits, file churn, branches and tags for the rev-range."""
     cfg, conn = _setup(config, repo, rev, db)
@@ -102,7 +102,7 @@ def extract(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
     ingest(conn, cfg["repo"]["path"], cfg["repo"]["rev_range"], log=_log)
 
 
-@app.command()
+@app.command(hidden=True)
 def signals(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Enrich commits: language, conventional-commit, work-kind, components."""
     cfg, conn = _setup(config, repo, rev, db)
@@ -110,7 +110,7 @@ def signals(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
     enrich(conn, log=_log)
 
 
-@app.command(name="untangle")
+@app.command(name="untangle", hidden=True)
 def untangle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                  force: bool = typer.Option(False, "--force", help="Re-untangle all commits")):
     """Untangle each commit's diff into semantic concerns (LLM; message untrusted)."""
@@ -121,7 +121,7 @@ def untangle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
              **_untangle_kwargs(cfg))
 
 
-@app.command()
+@app.command(hidden=True)
 def catalog_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                 frozen: bool = typer.Option(False, "--frozen",
                     help="Classify strictly against the existing taxonomy; never mint new features"),
@@ -140,10 +140,10 @@ def catalog_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: s
     catalog(conn, provider, cfg, cfg["repo"]["rev_range"], head, log=_log)
 
 
-app.command(name="catalog")(catalog_cmd)
+app.command(name="catalog", hidden=True)(catalog_cmd)
 
 
-@app.command()
+@app.command(hidden=True)
 def attribute_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Attach commits to domains (many-to-many) by the files they touch."""
     _, conn = _setup(config, repo, rev, db)
@@ -151,10 +151,10 @@ def attribute_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db:
     attribute(conn, log=_log)
 
 
-app.command(name="attribute")(attribute_cmd)
+app.command(name="attribute", hidden=True)(attribute_cmd)
 
 
-@app.command()
+@app.command(hidden=True)
 def lifecycle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Detect domain lifecycle (active/dormant/merged/removed) vs the ref tip."""
     cfg, conn = _setup(config, repo, rev, db)
@@ -163,10 +163,10 @@ def lifecycle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db:
     lifecycle(conn, cfg["repo"]["path"], head, cfg, log=_log)
 
 
-app.command(name="lifecycle")(lifecycle_cmd)
+app.command(name="lifecycle", hidden=True)(lifecycle_cmd)
 
 
-@app.command()
+@app.command(hidden=True)
 def discover_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                  force: bool = typer.Option(False, "--force", help="Re-name already-named domains"),
                  limit: Optional[int] = typer.Option(None, "--limit", help="Only the N largest domains")):
@@ -177,10 +177,10 @@ def discover_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
     discover(conn, provider, cfg, cfg["repo"]["path"], log=_log, force=force, limit=limit)
 
 
-app.command(name="discover")(discover_cmd)
+app.command(name="discover", hidden=True)(discover_cmd)
 
 
-@app.command()
+@app.command(hidden=True)
 def graph(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
           out: Optional[str] = typer.Option(None, "--out", help="HTML output path"),
           json_out: Optional[str] = typer.Option(None, "--json", help="features.json output path")):
@@ -190,7 +190,7 @@ def graph(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _
     export_graph(conn, out or cfg["output"]["html"], json_out or cfg["output"]["json"], log=_log)
 
 
-@app.command(name="chronicle")
+@app.command(name="chronicle", hidden=True)
 def chronicle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                   force: bool = typer.Option(False, "--force", help="Rebuild all chapters")):
     """Build the narrative evolution chronicle (per domain + repo). LLM; opt-in."""
@@ -200,7 +200,7 @@ def chronicle_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db:
     chronicle(conn, provider, cfg["repo"]["path"], log=_log, force=force)
 
 
-@app.command()
+@app.command(hidden=True)
 def run(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
         chronicle_flag: bool = typer.Option(False, "--chronicle",
             help="Also build the narrative evolution chronicle (LLM; opt-in)"),
@@ -258,7 +258,7 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
                out: Optional[str] = typer.Option(None, "--out",
                    help="Dossier/kb.html directory (default: [output].kb_dir in config)"),
                chronicle_flag: bool = typer.Option(False, "--chronicle",
-                   help="Also narrate each entry's evolution (LLM; cached after the first run)")):
+                   help="Narrate entries whose story is not cached yet (LLM spend)")):
     """Follow the repository: ingest what is new and rebuild the knowledge base.
 
     The command to run on a schedule. Ingest and untangle are already incremental — only
@@ -289,7 +289,8 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     provider = build_provider(cfg, conn)
     _head("Untangle"); untangle(conn, provider, repo_path, log=_log, **_untangle_kwargs(cfg))
     _head("Lineage")
-    res = build_lineage(conn, repo_path, log=_log)
+    res = build_lineage(conn, repo_path, log=_log,
+                        golden_probes=cfg.get("lineage", {}).get("golden"))
     if not res["report"]["pass"]:
         console.print("[red]structural validation failed — knowledge base not rebuilt[/]")
         raise typer.Exit(2)
@@ -297,12 +298,11 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     out_conn = connect(emit); init_db(out_conn)
     _head("Relations"); build_relations(out_conn, repo_path, log=_log); out_conn.commit()
     _head("Tiers"); assign_tiers(out_conn, Ledger.load(), log=_log)
-    if chronicle_flag:
-        # Chapters live in the KB, which is rebuilt every run — so the LLM cache must NOT.
-        # `provider` caches against the working DB, which persists, making the second and
-        # every later run free rather than re-narrating 671 chapters from scratch.
-        _head("Chronicle")
-        chronicle(out_conn, provider, repo_path, log=_log)
+    # Chapters live in the KB, which is rebuilt every run — so the LLM cache must NOT.
+    # `provider` caches against the working DB, which persists, so every chapter already
+    # paid for comes back for free; without --chronicle nothing new is bought.
+    _head("Chronicle")
+    chronicle(out_conn, provider, repo_path, log=_log, cached_only=not chronicle_flag)
     out_conn.close()
     _head("Export")
     from .serve.dossier import export_dossiers
@@ -381,7 +381,7 @@ def init_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str 
     console.print("[green]init complete[/] — scope in place. Next: [bold]gitchronicle register[/]")
 
 
-@app.command(name="register")
+@app.command(name="register", hidden=True)
 def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                  force: bool = typer.Option(False, "--force", help="Rebuild the register")):
     """Build the feature register from the CURRENT worktree (scoped): module units ->
@@ -393,7 +393,7 @@ def register_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: 
     build_register(conn, provider, cfg["repo"]["path"], cfg, log=_log, force=force)
 
 
-@app.command(name="lineage")
+@app.command(name="lineage", hidden=True)
 def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
                 emit: str = typer.Option(None, "--emit",
                                          help="Write the named v0.3 register to this fresh DB")):
@@ -403,7 +403,8 @@ def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: s
     from .taxonomy.lineage import build_lineage
     cfg, conn = _setup(config, repo, rev, db)
     _head("Lineage")
-    res = build_lineage(conn, cfg["repo"]["path"], log=_log)
+    res = build_lineage(conn, cfg["repo"]["path"], log=_log,
+                        golden_probes=cfg.get("lineage", {}).get("golden"))
     if not emit:
         return
     if not res["report"]["pass"]:
@@ -438,12 +439,59 @@ def studio_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     Reads the knowledge base and writes only `gitchronicle.plan` — re-run `update` to
     rebuild with it.
     """
+    import sys
+
     from .serve.studio import serve_studio
     cfg, _ = _setup(config, repo, rev, db)
     _head("Studio")
+
+    def provider_factory():
+        # answers cache against the working DB like every other call, so asking the
+        # same question twice is free
+        return build_provider(cfg, connect(cfg["db"]["path"]))
+
     # the KB, not the working DB: the studio reads what `update` emits
     serve_studio(db or cfg.get("output", {}).get("kb", cfg["db"]["path"]),
-                 log=_log, port=port)
+                 log=_log, port=port, provider_factory=provider_factory,
+                 title=Path(cfg["repo"]["path"]).name,
+                 rebuild_argv=[sys.executable, "-m", "gitchronicle", "update",
+                               "--config", config])
+
+
+@app.command(name="mcp")
+def mcp_cmd(config: str = _Config,
+            kb: Optional[str] = typer.Option(None, "--kb", help="Knowledge base (default: [output].kb)")):
+    """Serve the knowledge base to coding agents over MCP (stdio).
+
+    Register it once, e.g. for Claude Code:
+        claude mcp add chronicle -- gitchronicle mcp --config /abs/path/config.toml
+    Read-only; stdout carries the protocol, so nothing else is printed.
+    """
+    from .serve.mcp import serve_mcp
+    if kb is None:
+        cfg = load_config(config)
+        kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
+        # agents start servers from anywhere: a relative path means relative to the config
+        if not Path(kb).is_absolute():
+            kb = str(Path(config).resolve().parent / kb)
+    if not Path(kb).exists():
+        sys.stderr.write(f"gitchronicle mcp: no knowledge base at {kb} — run `gitchronicle update`\n")
+        raise typer.Exit(1)
+    serve_mcp(kb)
+
+
+@app.command(name="eval")
+def eval_cmd(questions: str = typer.Argument(..., help="JSON list of {q, facts, unanswerable}"),
+             config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
+    """Grade the knowledge base: ask questions whose answers you know, score the answers."""
+    from .evaluate import run_eval
+    cfg, conn = _setup(config, repo, rev, db)
+    kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
+    _head("Eval")
+    res = run_eval(questions, kb, build_provider(cfg, conn), log=_log)
+    out = Path(questions).with_suffix(".result.json")
+    out.write_text(_json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    _log(f"  answers and verdicts -> {out}")
 
 
 @app.command(name="ledger")
@@ -507,7 +555,7 @@ def ledger_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
         _log(f"  reject {t}")
 
 
-@app.command()
+@app.command(hidden=True)
 def dossier(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
             out: str = typer.Option("dossiers", "--out", help="Output directory")):
     """Export per-feature dossier bundles (md+json with commit citations) + journey index."""
@@ -517,7 +565,7 @@ def dossier(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
     export_dossiers(conn, out, log=_log)
 
 
-@app.command()
+@app.command(hidden=True)
 def relations(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Infer built-on/uses edges between register features from static imports (local)."""
     from .taxonomy.relations import build_relations
@@ -526,7 +574,7 @@ def relations(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str
     build_relations(conn, cfg["repo"]["path"], log=_log)
 
 
-@app.command()
+@app.command(hidden=True)
 def check(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Taxonomy health metrics: stem coherence, near-dups, confidence, coverage."""
     from .taxonomy.check import print_health
@@ -535,7 +583,7 @@ def check(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _
     print_health(conn, log=_log)
 
 
-@app.command()
+@app.command(hidden=True)
 def inspect(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
             out: str = typer.Option("build/inspect.html", "--out", help="Output HTML path")):
     """Export the per-stage validation GUI (self-contained inspect.html, read-only)."""
@@ -550,7 +598,7 @@ def inspect(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
 tax_app = typer.Typer(add_completion=False, no_args_is_help=True,
                       help="Inspect and curate the feature taxonomy (optional review seam; "
                            "the pipeline never blocks on it).")
-app.add_typer(tax_app, name="taxonomy")
+app.add_typer(tax_app, name="taxonomy", hidden=True)
 
 
 @tax_app.command("list")
@@ -728,7 +776,7 @@ def _resolve_asof(conn, asof: Optional[str]) -> Optional[str]:
     return (row["time_start"][:10] if row else asof)
 
 
-@app.command()
+@app.command(hidden=True)
 def domains(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
             as_of: Optional[str] = typer.Option(None, "--as-of", help="Only domains alive at a tag or YYYY-MM-DD"),
             state: Optional[str] = typer.Option(None, "--lifecycle", help="Filter by lifecycle state")):
@@ -756,7 +804,7 @@ def domains(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
     console.print(t)
 
 
-@app.command()
+@app.command(hidden=True)
 def show(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Show one domain: what/why/evolution, who, when, files, commits, relations."""
     _, conn = _setup(config, repo, rev, db)
@@ -816,7 +864,7 @@ def show(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, d
             console.print(f"  · [{a['kind']}] {head}{a['note'] or ''}")
 
 
-@app.command()
+@app.command(hidden=True)
 def annotate(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
              set_name: Optional[str] = typer.Option(None, "--name", help="Correct the domain name"),
              classification: Optional[str] = typer.Option(None, "--classification", help="Set classification"),
@@ -854,7 +902,7 @@ def annotate(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Re
                   + (" (confirmed & locked)" if confirm else ""))
 
 
-@app.command(name="index")
+@app.command(name="index", hidden=True)
 def index_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Build the semantic + full-text search indexes over the knowledge base."""
     cfg, conn = _setup(config, repo, rev, db)
@@ -863,7 +911,7 @@ def index_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str
     build_index(conn, provider, log=_log)
 
 
-@app.command()
+@app.command(hidden=True)
 def features(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """List the project's features/domains — what was built."""
     _, conn = _setup(config, repo, rev, db)
@@ -878,7 +926,7 @@ def features(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str 
             console.print(f"  {r['summary']}")
 
 
-@app.command()
+@app.command(hidden=True)
 def who(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Who worked on a feature/domain — authors, when, and why it exists."""
     cfg, conn = _setup(config, repo, rev, db)
@@ -900,49 +948,17 @@ def who(name: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, db
 
 @app.command()
 def ask(question: str, config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
-    """Ask the knowledge base a natural-language question (retrieval-augmented, cited)."""
+    """Ask the knowledge base a question; the answer cites entries and commits."""
+    from .serve.search import Index, ask as kb_ask
     cfg, conn = _setup(config, repo, rev, db)
-    provider = build_provider(cfg, conn)
-    acfg = cfg.get("ask", {})
-    kd = int(acfg.get("k_domains", 8))
-    sem = [i for i, _ in semantic(conn, provider, question, k=kd)]
-    dom_ids = list(dict.fromkeys(sem + keyword_domains(conn, question, k=kd)))[:kd]
-    if not dom_ids:
-        console.print("[yellow]No indexed domains — run `gitchronicle index` first.[/]")
+    kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
+    if not Path(kb).exists():
+        console.print(f"[yellow]No knowledge base at {kb} — run `gitchronicle update` first.[/]")
         raise typer.Exit(1)
-    blocks = []
-    for did in dom_ids:
-        d = conn.execute("SELECT id, name, classification, summary, n_commits, "
-                         "first_seen, last_seen FROM domains WHERE id=?", (did,)).fetchone()
-        if not d:
-            continue
-        authors = [r["author_name"] for r in conn.execute(
-            "SELECT c.author_name FROM commit_domains cd JOIN commits c ON c.hash=cd.commit_hash "
-            "WHERE cd.domain_id=? GROUP BY c.author_name ORDER BY COUNT(*) DESC LIMIT 4", (did,))]
-        story = " ".join(r["narrative"] or "" for r in conn.execute(
-            "SELECT narrative FROM evolution_chapters WHERE target_type='domain' AND target_id=? "
-            "ORDER BY seq", (str(d["id"]),)))
-        blocks.append(
-            f"DOMAIN: {d['name']} [{d['classification']}] ({d['n_commits']} commits, "
-            f"{(d['first_seen'] or '')[:10]}..{(d['last_seen'] or '')[:10]}; "
-            f"authors: {', '.join(a for a in authors if a)})\n"
-            f"  what: {d['summary'] or '(n/a)'}"
-            + (f"\n  evolution: {story[:600]}" if story else ""))
-    commits = []
-    for h in keyword_commits(conn, question, k=int(acfg.get("k_commits", 10))):
-        r = conn.execute("SELECT hash, authored_at, author_name, subject FROM commits WHERE hash=?",
-                         (h,)).fetchone()
-        if r:
-            commits.append(f"  {r['hash'][:10]} {(r['authored_at'] or '')[:10]} "
-                           f"{r['author_name']}: {r['subject']}")
-    system = ("You answer questions about a software project using ONLY the knowledge base "
-              "provided (domains and commits). Cite domains by name and commits by short hash. "
-              "If the knowledge base does not cover it, say so. Be concise and concrete.")
-    user = (f"QUESTION: {question}\n\nKNOWLEDGE BASE — DOMAINS:\n" + "\n\n".join(blocks)
-            + "\n\nRELEVANT COMMITS:\n" + ("\n".join(commits) or "(none)")
-            + "\n\nAnswer the question, citing domains and commit hashes.")
-    ans = provider.chat(system, user, want_json=False, large=True)
-    console.print(ans if isinstance(ans, str) else str(ans))
+    r = kb_ask(Index(kb), kb, build_provider(cfg, conn), question)
+    console.print(r["answer"])
+    if r["used"]:
+        console.print(f"\n[dim]read: {', '.join(r['used'])}[/]")
 
 
 if __name__ == "__main__":
