@@ -24,3 +24,6 @@ features.json
 
 .serena
 .claude
+
+# eval answers are regenerated output
+eval/*.result.json
