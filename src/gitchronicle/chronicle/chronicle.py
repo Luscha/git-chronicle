@@ -17,6 +17,7 @@ from datetime import datetime
 
 from ..extract.git_ingest import run_git
 from ..scope import Direction
+from ..llm.provider import NotCached
 from ..storage import now_iso
 
 _GAP_DAYS = 14
@@ -211,6 +212,8 @@ def _repo_chronicle(conn, provider, log, force):
                 '{"title":"...","narrative":"2-4 sentences"}')
         try:
             r = provider.chat(REPO_SYS, user, want_json=True, large=True, cache_extra=f"repo:{k}:{len(cs)}")
+        except NotCached:
+            raise
         except Exception as exc:  # noqa: BLE001
             log(f"    repo period {k} failed ({exc})")
             r = {}
@@ -301,7 +304,13 @@ def _prefetch(conn, provider, repo, doms, workers, log) -> None:
 
 
 def chronicle(conn, provider, repo: str, log=print, force: bool = False,
-              workers: int = 8) -> dict:
+              workers: int = 8, cached_only: bool = False) -> dict:
+    """Narrate every entry's evolution.
+
+    ``cached_only`` narrates only what the cache already holds and leaves the rest for a
+    paid run. The knowledge base is rebuilt on every update, so without it a plain update
+    erased all 779 chapters until the next ``--chronicle``.
+    """
     # voice shapes HOW the story reads, never what the evidence says — the grounding
     # rules in CHAP_SYS stay in front of it and are not overridable from the file
     direction = Direction.load()
@@ -311,9 +320,28 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False,
     _DIR_KEY = direction.key()
     doms = conn.execute(
         "SELECT id, name FROM domains WHERE status != 'rejected' ORDER BY n_commits DESC").fetchall()
-    log(f"  chronicling {len(doms)} domains ...")
-    _prefetch(conn, provider, repo, doms, workers, log)
-    done = 0
+    log(f"  chronicling {len(doms)} domains{' (cache only)' if cached_only else ''} ...")
+    if not cached_only:
+        _prefetch(conn, provider, repo, doms, workers, log)
+    was, provider.cache_only = provider.cache_only, cached_only
+    try:
+        done, pending = _narrate(conn, provider, repo, doms, force, log)
+        try:
+            _repo_chronicle(conn, provider, log, force)
+        except NotCached:
+            pass
+    finally:
+        provider.cache_only = was
+    n_chap = conn.execute("SELECT COUNT(*) FROM evolution_chapters").fetchone()[0]
+    log(f"  {n_chap} chapters total (domain + repo)")
+    if pending:
+        log(f"  {len(pending)} entries not narrated yet (e.g. {', '.join(pending[:4])}) — "
+            f"run `gitchronicle update --chronicle`")
+    return {"domains_chronicled": done, "chapters": n_chap, "pending": pending}
+
+
+def _narrate(conn, provider, repo, doms, force, log) -> tuple[int, list[str]]:
+    done, pending = 0, []
     for d in doms:
         did = d["id"]
         if not force and conn.execute(
@@ -324,66 +352,70 @@ def chronicle(conn, provider, repo: str, log=print, force: bool = False,
         if not commits:
             continue
         concerns = _domain_concerns(conn, did)
-        chapters = _cluster(commits)
-        conn.execute("DELETE FROM evolution_chapters WHERE target_type='domain' AND target_id=?", (str(did),))
-        narratives = []
-        for seq, ch in enumerate(chapters):
-            if len(ch) == 1:
-                # one commit needs no narration — its own concern (or message) IS
-                # the chapter, and the concern is already this domain's slice
-                c0 = ch[0]
-                own = concerns.get(c0["hash"], [])
-                body0 = "; ".join(own) or (c0["body"].splitlines() or [""])[0][:240]
-                # Title from THIS domain's concern label, not the commit subject. A single
-                # commit here usually ships several features at once, so its subject names
-                # other people's work: "chore: core dump fix: pet requirements chore:
-                # updated mob_proto" was the Battle Pass chapter heading. The label is
-                # already the per-domain slice.
-                title = (own[0].split(":", 1)[0] if own else c0["subject"])[:80]
-                conn.execute(
-                    "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, "
-                    "period_end, title, narrative, commit_hashes, created_at) "
-                    "VALUES ('domain', ?,?,?,?,?,?,?,?)",
-                    (str(did), seq, c0["date"], c0["date"], title,
-                     body0[:400], json.dumps([c0["hash"][:10]]), now_iso()))
-                narratives.append(body0 or c0["subject"])
-                continue
-            user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns)
-            try:
-                r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
-            except Exception as exc:  # noqa: BLE001
-                log(f"    chapter {did}.{seq} failed ({exc})")
-                r = {}
-            r = r if isinstance(r, dict) else {}
-            narr = (r.get("narrative") or "").strip()
-            narratives.append(narr)
-            conn.execute(
-                "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, period_end, "
-                "title, narrative, commit_hashes, created_at) VALUES ('domain', ?,?,?,?,?,?,?,?)",
-                (str(did), seq, ch[0]["date"], ch[-1]["date"], (r.get("title") or "").strip()[:80],
-                 narr, json.dumps([c["hash"][:10] for c in ch]), now_iso()))
+        # rows are collected first and written together: an entry is narrated whole or
+        # not at all, so a cache-only run never leaves half a story behind
+        rows, narratives = [], []
+        try:
+            for seq, ch in enumerate(_cluster(commits)):
+                if len(ch) == 1:
+                    # one commit needs no narration — its own concern (or message) IS
+                    # the chapter, and the concern is already this domain's slice
+                    c0 = ch[0]
+                    own = concerns.get(c0["hash"], [])
+                    body0 = "; ".join(own) or (c0["body"].splitlines() or [""])[0][:240]
+                    # Title from THIS domain's concern label, not the commit subject. A
+                    # single commit here usually ships several features at once, so its
+                    # subject names other people's work.
+                    title = (own[0].split(":", 1)[0] if own else c0["subject"])[:80]
+                    rows.append((seq, c0["date"], c0["date"], title, body0[:400],
+                                 [c0["hash"][:10]]))
+                    narratives.append(body0 or c0["subject"])
+                    continue
+                user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns)
+                try:
+                    r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
+                except NotCached:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log(f"    chapter {did}.{seq} failed ({exc})")
+                    r = {}
+                r = r if isinstance(r, dict) else {}
+                narr = (r.get("narrative") or "").strip()
+                narratives.append(narr)
+                rows.append((seq, ch[0]["date"], ch[-1]["date"],
+                             (r.get("title") or "").strip()[:80], narr,
+                             [c["hash"][:10] for c in ch]))
+        except NotCached:
+            pending.append(d["name"])
+            continue
+        conn.execute("DELETE FROM evolution_chapters WHERE target_type='domain' AND target_id=?",
+                     (str(did),))
+        conn.executemany(
+            "INSERT INTO evolution_chapters (target_type, target_id, seq, period_start, "
+            "period_end, title, narrative, commit_hashes, created_at) "
+            "VALUES ('domain', ?,?,?,?,?,?,?,?)",
+            [(str(did), seq, a, b, t, n, json.dumps(h), now_iso())
+             for seq, a, b, t, n, h in rows])
         # distill the domain's "what" from its story (a one-commit feature has no arc
         # to distill — its register definition already says what it is)
         story = "\n".join(f"- {n}" for n in narratives if n)
-        if len(commits) == 1:
-            conn.commit()
-            done += 1
-            continue
-        try:
-            r = provider.chat(DISTILL_SYS, f"Domain: {d['name']}\nEvolution:\n{story}\n\n"
-                              'Return {"summary":"..."}', want_json=True, cache_extra=f"distill:{d['name']}:{len(narratives)}")
-            summary = ((r.get("summary") if isinstance(r, dict) else "") or "").strip()
-            if summary:
-                conn.execute("UPDATE domains SET summary=? WHERE id=? AND status!='confirmed' AND locked=0",
-                             (summary, did))
-        except Exception as exc:  # noqa: BLE001
-            log(f"    distill {did} failed ({exc})")
+        if len(commits) > 1:
+            try:
+                r = provider.chat(DISTILL_SYS, f"Domain: {d['name']}\nEvolution:\n{story}\n\n"
+                                  'Return {"summary":"..."}', want_json=True,
+                                  cache_extra=f"distill:{d['name']}:{len(narratives)}")
+                summary = ((r.get("summary") if isinstance(r, dict) else "") or "").strip()
+                if summary:
+                    conn.execute("UPDATE domains SET summary=? WHERE id=? AND status!='confirmed' "
+                                 "AND locked=0", (summary, did))
+            except NotCached:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                log(f"    distill {did} failed ({exc})")
         conn.commit()
         done += 1
-        if done % 5 == 0 or done == len(doms):
+        if done % 25 == 0:
             log(f"    {done}/{len(doms)} chronicled")
+    return done, pending
 
-    _repo_chronicle(conn, provider, log, force)
-    n_chap = conn.execute("SELECT COUNT(*) FROM evolution_chapters").fetchone()[0]
-    log(f"  {n_chap} chapters total (domain + repo)")
-    return {"domains_chronicled": done, "chapters": n_chap}
+

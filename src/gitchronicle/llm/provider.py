@@ -60,6 +60,10 @@ class LLMError(RuntimeError):
     pass
 
 
+class NotCached(LLMError):
+    """A cache-only provider was asked for something it has never paid for."""
+
+
 _VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
@@ -189,6 +193,7 @@ class Provider:
         self.roles = {"chat": chat_cfg, "chat_large": self.chat_large_cfg,
                       **(roles or {})}
         self.conn = conn
+        self.cache_only = False
         self.db_lock = threading.Lock()   # guards the shared sqlite conn (concurrent untangle)
         timeout = max(float(chat_cfg.get("timeout", 900)),
                       float(self.chat_large_cfg.get("timeout", 900)))
@@ -222,6 +227,8 @@ class Provider:
         cached = self._cache_get(key)
         if cached is not None:
             return _extract_json(cached) if want_json else cached
+        if self.cache_only:
+            raise NotCached(key)
 
         if provider == "ollama":
             content, usage = self._chat_ollama(cfg, system, user, want_json)
