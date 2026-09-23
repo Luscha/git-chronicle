@@ -156,7 +156,8 @@ def _root_exclusions(work: list[dict]) -> tuple[set, set]:
     return substrate, glue
 
 
-def build_lineage(conn, repo: str, log=print, golden_probes: dict | None = None) -> dict:
+def build_lineage(conn, repo: str, log=print, golden_probes: dict | None = None,
+                  canonical: bool = True) -> dict:
     cons = _work_concerns(conn)
     log(f"  {len(cons)} work concerns (import-origin filtered)")
 
@@ -321,12 +322,17 @@ def build_lineage(conn, repo: str, log=print, golden_probes: dict | None = None)
         if old not in fwd or date > fwd[old][1]:
             fwd[old] = (new, date)
 
-    def _alive(path: str) -> bool:
+    def _current(path: str) -> str | None:
+        """The name this file has at HEAD, through any renames, or None if it is gone.
+        Chains loop (a -> b, later b -> a), hence the guard."""
         seen: set = set()
         while path not in head and path in fwd and path not in seen:
             seen.add(path)
             path = fwd[path][0]
-        return path in head
+        return path if path in head else None
+
+    def _alive(path: str) -> bool:
+        return _current(path) is not None
 
     members: dict[str, list[int]] = defaultdict(list)
     for i, fam in sorted(assign.items()):
@@ -355,7 +361,10 @@ def build_lineage(conn, repo: str, log=print, golden_probes: dict | None = None)
     report = _validate(clusters, work, log, golden_probes)
     return {"work": work, "base": base, "clusters": clusters,
             "substrate": sorted(substrate), "glue": sorted(glue),
-            "auth": auth, "root_of": root_of, "alive": _alive, "report": report}
+            "auth": auth, "root_of": root_of, "alive": _alive, "report": report,
+            # territory speaks in today's names, so a renamed file is one file: measured,
+            # 125 files sat in one entry under their old name and another under the new
+            "canon": (lambda f: _current(f) or f) if canonical else (lambda f: f)}
 
 
 def _validate(clusters: list[dict], work: list[dict], log=print,
@@ -505,7 +514,7 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
         for i in cl["idxs"]:
             for f in work[i]["files"]:
                 if f in cl["files"] and res["root_of"].get(f) not in barred:
-                    file_claims[f][ci] += 1
+                    file_claims[res["canon"](f)][ci] += 1
     territory: dict[int, dict] = defaultdict(dict)
     for f, claims in file_claims.items():
         top = claims.most_common(2)
@@ -538,7 +547,10 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
     # in union with the worktree name-claim, then the ledger's rules last so a human
     # verdict always outranks both. Measured: median territory 6 -> 13 files, entries
     # with none 15 -> 6.
-    authored = sorted(f for f, v in res["auth"].items() if v == "authored" and alive(f))
+    # alive(f) holds for a renamed file's OLD name too; claiming that name would put the
+    # file in the catalogue twice, once under each name
+    authored = sorted({res["canon"](f) for f, v in res["auth"].items()
+                       if v == "authored" and alive(f)})
     entries = {ci: {"name": named[ci][0], "seed": feats[ci]["seed"]} for ci in named}
     weights = {ci: territory.get(ci, {}) for ci in named}
     led = Ledger.load()
@@ -562,7 +574,7 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             return None
         dests = set()
         for f in files:
-            d = led.destination(f, name)
+            d = led.destination(res["canon"](f), name)
             if d is None:
                 return None
             dests.add(merged_into.get(d, d))
@@ -654,11 +666,15 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
     for name, files in sorted(declared.items()):
         if not files:
             continue
+        # current names only: following renames back gave Wiki Manager the old wiki
+        # builder's 2024 commits, and answers then dated its creation a year early
+        # (eval 84% -> 76%). Ancestry is a relation between entries, not their own history.
+        named_as = sorted(files)
         rows = out.execute(
             "SELECT MIN(c.authored_at), MAX(c.authored_at), COUNT(DISTINCT c.hash) "
             "FROM commit_files cf JOIN commits c ON c.hash = cf.commit_hash "
-            f"WHERE cf.path IN ({','.join('?' * len(files))}) AND c.is_merge = 0",
-            tuple(sorted(files))).fetchone()
+            f"WHERE cf.path IN ({','.join('?' * len(named_as))}) AND c.is_merge = 0",
+            tuple(named_as)).fetchone()
         born, last, ncom = rows[0] or "", rows[1] or "", rows[2] or 0
         # a rename is a merge into a new name: the description travels with it
         inherited = next((named[ci][1] for ci in named
@@ -681,8 +697,8 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
             "VALUES (?,?,1.0,'ledger')",
             [(r[0], did) for r in out.execute(
                 "SELECT DISTINCT cf.commit_hash FROM commit_files cf JOIN commits c "
-                f"ON c.hash = cf.commit_hash WHERE cf.path IN ({','.join('?' * len(files))}) "
-                "AND c.is_merge = 0", tuple(sorted(files)))])
+                f"ON c.hash = cf.commit_hash WHERE cf.path IN ({','.join('?' * len(named_as))}) "
+                "AND c.is_merge = 0", tuple(named_as))])
     out.commit()
 
     # the concerns a rule carried away land where their files went
