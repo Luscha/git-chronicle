@@ -223,7 +223,10 @@ class Provider:
         # Generation params are part of the identity of a response — cache on them too, so
         # changing temperature/seed correctly invalidates stale entries.
         key = _cache_key(provider, model, "chat", system, user, cache_extra,
-                         str(cfg.get("temperature", "")), str(cfg.get("seed", "")))
+                         str(cfg.get("temperature", "")), str(cfg.get("seed", "")),
+                         # part of the key only when set, so existing caches stay valid
+                         *[f"{k}={cfg[k]}" for k in ("reasoning_effort", "thinking_budget")
+                           if cfg.get(k) is not None])
         cached = self._cache_get(key)
         if cached is not None:
             return _extract_json(cached) if want_json else cached
@@ -248,6 +251,14 @@ class Provider:
         }
         if cfg.get("seed") is not None:   # reproducible sampling (generic; honoured where supported)
             payload["seed"] = int(cfg["seed"])
+        # Thinking models reason before answering and bill it as output: on untangle it
+        # was over half of all tokens. Gemini takes a budget (0 = off; Vertex rejects
+        # reasoning_effort="none"), other endpoints take reasoning_effort.
+        if cfg.get("reasoning_effort"):
+            payload["reasoning_effort"] = cfg["reasoning_effort"]
+        if cfg.get("thinking_budget") is not None:
+            payload["extra_body"] = {"google": {"thinking_config": {
+                "thinking_budget": int(cfg["thinking_budget"])}}}
         # json_mode=false is the escape hatch for endpoints that reject response_format;
         # _extract_json already tolerates a model that answers with prose around the object.
         if want_json and cfg.get("json_mode", True):
@@ -327,6 +338,11 @@ class Provider:
             return
         ti = (usage or {}).get("prompt_tokens")
         to = (usage or {}).get("completion_tokens")
+        # thinking models bill their reasoning as output but may leave it out of
+        # completion_tokens; the total is what the invoice counts
+        total = (usage or {}).get("total_tokens")
+        if total and ti is not None and total - ti > (to or 0):
+            to = total - ti
         with self.db_lock:
             self.conn.execute(
                 "INSERT OR REPLACE INTO llm_cache "

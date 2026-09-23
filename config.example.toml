@@ -51,6 +51,10 @@ json = "build/domains.json"  # machine-readable export to build your own site on
 # The chat model does per-commit untangle + naming: the dominant cost (O(commits)). Model choice
 # matters — a <=3B model is too weak; 7B is the usable floor; 14-32B is the sweet spot. Use a cloud
 # API (below) or a local 14B+ on a GPU. See the README "Choosing a model & provider".
+# THINKING MODELS: reasoning is billed as output and dominated the bill — Gemini 2.5 Flash
+# spent 52% of its untangle tokens on it, for no measurable gain (eval 91% either way).
+# Turn it off with thinking_budget = 0 (Gemini; Vertex rejects reasoning_effort = "none")
+# or reasoning_effort = "low"/"none" on other endpoints.
 [providers.chat]
 kind = "openai"
 base_url = "https://api.scaleway.ai/v1"     # any OpenAI-compatible base URL
