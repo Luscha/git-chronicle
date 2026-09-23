@@ -360,6 +360,22 @@ entry mixing tests, CLI and downloads, sessions split in two, only 2 dependency 
 fork-aware "inherited baseline" entries on a repo that is not a fork. The pipeline's
 defaults were tuned on one repository and it shows.
 
+**Scan direction, renames and thinking (v0.5 experiments).** Walking history newest-to-oldest
+does not change what the pipeline finds — untangle is per-commit and clustering is global —
+but three things measured on it were worth keeping:
+
+| change | effect |
+|---|---|
+| territory in **current** names (renames resolved, cycle-guarded) | files split across two entries by a rename: **123 → 0**; 236 duplicate paths gone; answers unchanged (83% ± 6 vs 84% ± 5) |
+| giving an entry its files' **pre-rename** history | **rejected**: Wiki Manager "began" in 2024 as the old wiki builder (84% → 76%) |
+| untangle **newest-first**, written as it goes | the last month is queryable after ~4 min instead of after the whole run |
+| Gemini Flash **thinking off** (`thinking_budget = 0`) | untangle of 6.5k commits: **$30 → $7.51** and **~5 h → 30 min**; answers **91% ± 0**, the best measured |
+
+The last row is a re-untangle from scratch, so it also measures the floor: a full first build
+of a 6,574-commit repository is about **$8 and half an hour**, narration included. Labels
+come out slightly terser than with thinking on (26 vs 30 characters, 1.58 vs 1.45 concerns
+per commit) and lose nothing the eval can see.
+
 Honest limits. The assembly still re-partitions as history grows — 58–68% of
 feature-grade clusters keep their own evidence across two years — which is *why* curation
 lives in the ledger rather than the database, but it does mean un-curated entries drift
