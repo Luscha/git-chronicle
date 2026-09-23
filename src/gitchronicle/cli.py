@@ -290,7 +290,8 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     _head("Untangle"); untangle(conn, provider, repo_path, log=_log, **_untangle_kwargs(cfg))
     _head("Lineage")
     res = build_lineage(conn, repo_path, log=_log,
-                        golden_probes=cfg.get("lineage", {}).get("golden"))
+                        golden_probes=cfg.get("lineage", {}).get("golden"),
+                        canonical=cfg.get("lineage", {}).get("canonical_paths", True))
     if not res["report"]["pass"]:
         console.print("[red]structural validation failed — knowledge base not rebuilt[/]")
         raise typer.Exit(2)
@@ -404,7 +405,8 @@ def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: s
     cfg, conn = _setup(config, repo, rev, db)
     _head("Lineage")
     res = build_lineage(conn, cfg["repo"]["path"], log=_log,
-                        golden_probes=cfg.get("lineage", {}).get("golden"))
+                        golden_probes=cfg.get("lineage", {}).get("golden"),
+                        canonical=cfg.get("lineage", {}).get("canonical_paths", True))
     if not emit:
         return
     if not res["report"]["pass"]:
@@ -482,13 +484,14 @@ def mcp_cmd(config: str = _Config,
 
 @app.command(name="eval")
 def eval_cmd(questions: str = typer.Argument(..., help="JSON list of {q, facts, unanswerable}"),
+             samples: int = typer.Option(3, "--samples", help="Ask each question this many times"),
              config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
     """Grade the knowledge base: ask questions whose answers you know, score the answers."""
     from .evaluate import run_eval
     cfg, conn = _setup(config, repo, rev, db)
     kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
     _head("Eval")
-    res = run_eval(questions, kb, build_provider(cfg, conn), log=_log)
+    res = run_eval(questions, kb, build_provider(cfg, conn), log=_log, samples=samples)
     out = Path(questions).with_suffix(".result.json")
     out.write_text(_json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
     _log(f"  answers and verdicts -> {out}")

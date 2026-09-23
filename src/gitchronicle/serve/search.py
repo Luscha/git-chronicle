@@ -19,6 +19,7 @@ import sqlite3
 import threading
 
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
+_VERSION = re.compile(r"v?\d+(\.\d+)+")
 _STOP = {"the", "and", "for", "what", "which", "when", "where", "who", "how", "why", "does",
          "did", "was", "were", "are", "is", "has", "have", "had", "that", "this", "with",
          "from", "into", "about", "there", "their", "them", "they", "our", "your", "can",
@@ -147,7 +148,7 @@ changed.
 short hash in backticks.
 - When the question is about time, answer with dates and order events chronologically. \
 Commits say when work was DONE; releases say when it SHIPPED, and "added in" usually means \
-the release. When the project has releases, give both: "built in December 2021, shipped \
+the release. When the project lists releases, give both: "built in December 2021, shipped \
 in 3.0.0 (January 2022)" — the first release dated after the work is the one that carried it.
 - If the evidence does not cover the question, say so plainly and say what it does cover.
 - Markdown: short paragraphs, bullet lists where they help. No headings. At most ~250 words."""
@@ -174,7 +175,7 @@ def _project_facts(kb) -> str:
             f"  main authors (commits, active years): {authors}")
 
 
-def ask(index: Index, kb_path: str, provider, question: str) -> dict:
+def ask(index: Index, kb_path: str, provider, question: str, sample: str = "") -> dict:
     hits = index.search(question, k=8)
     kb = sqlite3.connect(kb_path)
     kb.row_factory = sqlite3.Row
@@ -214,9 +215,16 @@ def ask(index: Index, kb_path: str, provider, question: str) -> dict:
                 + (f"  used by: {', '.join(used)}\n" if used else "")
                 + (f"  chapters:\n{story}" if story else ""))
         project = _project_facts(kb)
-        releases = [(r[0], (r[1] or "")[:10]) for r in kb.execute(
+        tags = [(r[0], (r[1] or "")[:10]) for r in kb.execute(
             "SELECT name, time_start FROM eras WHERE time_start IS NOT NULL "
             "ORDER BY time_start")]
+        # Only version-shaped tags are releases. void-queue tags milestones of single
+        # components (ccc-rc1.14, luna-alpha-2); treated as releases, the battle pass
+        # "shipped in ccc-rc1".
+        releases = [t for t in tags if _VERSION.fullmatch(t[0])]
+        if len(releases) < 3:
+            releases = []
+        milestones = [t for t in tags if t not in releases]
     finally:
         kb.close()
 
@@ -229,9 +237,13 @@ def ask(index: Index, kb_path: str, provider, question: str) -> dict:
                         f"{c['subject'][:140]}" for c in hits["commits"][:12])
     if releases:
         project += "\n  releases (tag, date): " + ", ".join(f"{n} {d}" for n, d in releases[-60:])
+    if milestones:
+        project += ("\n  other tags — milestone markers, NOT releases (tag, date): "
+                    + ", ".join(f"{n} {d}" for n, d in milestones[-40:]))
     user = (f"QUESTION: {question}\n\nEVIDENCE — THE PROJECT:\n{project}\n\nEVIDENCE — ENTRIES:\n"
             + ("\n\n".join(blocks) or "(none matched)")
             + "\n\nEVIDENCE — COMMITS:\n" + (commits or "(none matched)"))
-    answer = provider.chat(_ASK_SYS, user, want_json=False, role="chat_large")
+    answer = provider.chat(_ASK_SYS, user, want_json=False, role="chat_large",
+                           cache_extra=sample)
     return {"answer": answer if isinstance(answer, str) else json.dumps(answer),
             "used": names, "hits": hits}
