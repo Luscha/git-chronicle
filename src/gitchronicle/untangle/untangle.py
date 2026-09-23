@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -340,7 +341,7 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
     # Skip merge commits: with full-ancestry traversal the merged branch's individual commits are
     # already present and carry the granular content — the merge's diff would just double-count them.
     todo = conn.execute(
-        "SELECT c.hash, c.subject, c.body FROM commits c WHERE c.is_merge=0 "
+        "SELECT c.hash, c.subject, c.body, c.authored_at FROM commits c WHERE c.is_merge=0 "
         "AND NOT EXISTS (SELECT 1 FROM concerns cn WHERE cn.commit_hash=c.hash) "
         "ORDER BY c.authored_at").fetchall()
     if not todo:
@@ -389,30 +390,23 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                  if overflow_by.get(h) else [])
         return out, extra
 
+    # Newest first, and written as soon as every newer commit is done: the recent past is
+    # what gets asked about, so a first run is useful long before it reaches 2016, and an
+    # interrupted one keeps everything it wrote. Writes follow this fixed order, not
+    # completion order, so concern ids stay reproducible.
+    order = sorted(todo, key=lambda r: (r["authored_at"] or "", r["hash"]), reverse=True)
     results: dict[str, object] = {}
-    fetched = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {}
-        for r in todo:
-            if not fileset[r["hash"]]:
-                results[r["hash"]] = ({}, [])
-                continue
-            futs[ex.submit(work, r)] = r["hash"]
-        for fut in as_completed(futs):
-            results[futs[fut]] = fut.result()
-            fetched += 1
-            if fetched % 200 == 0 or fetched == len(futs):
-                log(f"    {fetched}/{len(futs)} inferred")
-
-    # Insert in deterministic todo (authored_at) order so concern ids are reproducible.
     done = nconc = nimp = 0
-    for r in todo:
+    t0 = time.monotonic()
+
+    def write(r):
+        nonlocal done, nconc, nimp
         h = r["hash"]
         files = fileset[h]
         if not files:
             mark_stage(conn, "untangle", h)
-            continue
-        out, extra = results.get(h) or ({}, [])
+            return
+        out, extra = results.pop(h, None) or ({}, [])
         for cc in _coerce(out, files, (r["subject"] or "change")[:80]):
             # msg-routed commits get no LLM summary; the subject is the change's one-liner.
             summary = cc["summary"] or (None if route[h] else (r["subject"] or "").strip()[:300])
@@ -429,8 +423,26 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
             nimp += cc["origin"] == "import"
         mark_stage(conn, "untangle", h)
         done += 1
-        if done % 500 == 0 or done == len(todo):
-            conn.commit()
+
+    k = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(work, r): r["hash"] for r in order if fileset[r["hash"]]}
+        fetched = 0
+        for fut in as_completed(futs):
+            results[futs[fut]] = fut.result()
+            fetched += 1
+            while k < len(order) and (not fileset[order[k]["hash"]]
+                                      or order[k]["hash"] in results):
+                write(order[k])
+                k += 1
+            if fetched % 200 == 0 or fetched == len(futs):
+                conn.commit()
+                reach = (order[k - 1]["authored_at"] or "")[:10] if k else "—"
+                log(f"    {fetched}/{len(futs)} inferred · written back to {reach} · "
+                    f"{(time.monotonic() - t0) / 60:.1f} min")
+    while k < len(order):
+        write(order[k])
+        k += 1
     conn.commit()
     log(f"  {nconc} concerns from {done} commits (avg {nconc / max(done, 1):.1f}/commit); "
         f"routed {n_msg} message / {n_diff} diff; {nimp} peek-labelled import families")
