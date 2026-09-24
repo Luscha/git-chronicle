@@ -38,7 +38,7 @@ def repo(tmp_path):
     commit("feat(reactor): core loop", {"src/reactor/core.py": "def spin():\n    return 1\n"}, 1)
     commit("feat(reactor): cooling", {"src/reactor/cooling.py": "def cool():\n    pass\n"}, 2)
     commit("feat(dashboard): first panel",
-           {"src/dashboard/panel.py": "from reactor.core import spin\n"}, 3)
+           {"src/dashboard/panel.py": "from cooling import cool\n"}, 3)
     git(r, "mv", "src/dashboard/panel.py", "src/dashboard/main_panel.py")
     commit("refactor(dashboard): rename the panel", {}, 4)
     commit("feat(dashboard): charts", {"src/dashboard/charts.py": "chart = 1\n"}, 5)

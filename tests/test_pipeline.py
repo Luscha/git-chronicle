@@ -185,3 +185,83 @@ def test_a_stated_relation_to_an_unknown_entry_is_reported_not_silent(config, pr
     build_relations(out, config["repo"]["path"], log=lambda m="": said.append(str(m)),
                     ledger=Ledger.load())
     assert any("Nonexistent System" in m for m in said)
+
+
+def test_a_refused_relation_is_removed_not_merely_unproposed(config, provider, monkeypatch,
+                                                             tmp_path):
+    """`not-uses` used to stop the studio PROPOSING a link while doing nothing to one the
+    imports had already asserted — so a link judged wrong could not be taken back."""
+    from gitchronicle.storage import connect
+    from gitchronicle.taxonomy.ledger import Ledger
+    from gitchronicle.taxonomy.relations import build_relations
+    plan = ('entry "Reactor"\n  claim src/reactor/**\nentry "Dashboard"\n'
+            '  claim src/dashboard/**\n  uses   "Reactor"\n')
+    build(config, provider, monkeypatch, tmp_path, plan=plan)
+    out = connect(config["output"]["kb"])
+    said = []
+    (tmp_path / "gitchronicle.plan").write_text(plan + 'not-uses   "Dashboard" -> "Reactor"\n')
+    build_relations(out, config["repo"]["path"], log=lambda m="": said.append(str(m)),
+                    ledger=Ledger.load())
+    out.commit()
+    edges = {(r[0], r[1]) for r in out.execute(
+        "SELECT s.name, t.name FROM domain_edges e JOIN domains s ON s.id=e.src_domain "
+        "JOIN domains t ON t.id=e.dst_domain")}
+    assert ("Dashboard", "Reactor") not in edges
+    # stating both is a contradiction, and saying nothing would leave the owner guessing
+    assert any("not-uses" in m for m in said)
+
+
+def test_an_import_resolves_only_to_a_file_its_own_syntax_could_name():
+    """`#include "config.h"` in char_affect.cpp was resolving to config.js in the web
+    panel. 85 of this repository's 227 import edges were that same collision."""
+    from gitchronicle.taxonomy.relations import _resolve
+    by_base = {"config": [(1, "ccc/frontend/public/config.js"), (2, "Server/src/config.hpp")]}
+    assert _resolve("config", "c", by_base) == [(2, "Server/src/config.hpp")]
+    assert _resolve("config", "es", by_base) == [(1, "ccc/frontend/public/config.js")]
+    # an unknown extension is left alone: .fx includes .fxh, .forge requires .lua
+    assert _resolve("x", "c", {"x": [(3, "shaders/terrain.fxh")]}) == [(3, "shaders/terrain.fxh")]
+
+
+def test_edge_evidence_names_the_files_behind_a_link(config, provider, monkeypatch, tmp_path):
+    """A link the owner cannot interrogate is a link the owner cannot judge."""
+    from gitchronicle.storage import connect
+    from gitchronicle.taxonomy.relations import edge_evidence
+    plan = ('entry "Reactor"\n  claim src/reactor/**\nentry "Dashboard"\n'
+            '  claim src/dashboard/**\n')
+    build(config, provider, monkeypatch, tmp_path, plan=plan)
+    out = connect(config["output"]["kb"])
+    ev = edge_evidence(out, config["repo"]["path"], "Dashboard", "Reactor")
+    assert any(e["file"].startswith("src/dashboard/") and e["ref"] == "cooling"
+               and e["target"] == "src/reactor/cooling.py" for e in ev), ev
+
+
+def test_a_chapter_carries_what_happened_after_it(config, provider, monkeypatch, tmp_path):
+    """The battle pass was switched off in a commit whose own summary says so, and the
+    chapter ran two months past it and was narrated "Introduced and Refined". What was
+    missing was not the commit: it was that the work then stopped, and that the file is
+    not in the repository today."""
+    from gitchronicle.chronicle.chronicle import _boundaries, _cluster, _domain_commits
+    from gitchronicle.storage import connect
+    conn, _ = build(config, provider, monkeypatch, tmp_path)
+    out = connect(config["output"]["kb"])
+    seen = []
+    for (did,) in out.execute("SELECT id FROM domains"):
+        commits = _domain_commits(out, did)
+        if commits:
+            seen += _boundaries(out, config["repo"]["path"], did, _cluster(commits))
+    # the shim was added and deleted inside this history; no territory can hold it,
+    # because territory is built from the files that still exist
+    assert any("src/legacy/shim.py" in b["gone"] for b in seen), seen
+    assert seen[-1]["last"] is True and all(b["gap_days"] >= 0 for b in seen)
+
+
+def test_rust_module_paths_resolve_to_their_module_not_their_type():
+    """Alacritty produced ZERO dependency links: every import pattern the extractor knew
+    was C, Python, JS or Lua. Rust names a module by path, and the last segment is the
+    type — its own snake_case/CamelCase convention tells them apart without parsing."""
+    from gitchronicle.taxonomy.imports import extract_import_refs
+    text = ("use alacritty_terminal::term::Term;\n"
+            "pub use crate::display::window::Window;\n"
+            "mod event;\n")
+    assert extract_import_refs(text, with_kind=True) == {
+        ("term", "rs"), ("window", "rs"), ("event", "rs")}

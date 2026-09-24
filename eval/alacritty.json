@@ -1,0 +1,111 @@
+[
+ {
+  "q": "When was the project started, and by whom?",
+  "facts": [
+   "February 2016",
+   "Joe Wilm"
+  ]
+ },
+ {
+  "q": "When was Windows support added, and what did it use for the PTY?",
+  "facts": [
+   "October 2018",
+   "winpty"
+  ]
+ },
+ {
+  "q": "When did the code split into separate crates?",
+  "facts": [
+   "April 2019",
+   "alacritty_terminal separated from the application"
+  ]
+ },
+ {
+  "q": "What happened to the bundled font crate?",
+  "facts": [
+   "renamed to crossfont in July 2020",
+   "moved out of this repository"
+  ]
+ },
+ {
+  "q": "When was the WinPTY backend removed, and what replaced it?",
+  "facts": [
+   "removed January 2021",
+   "ConPTY"
+  ]
+ },
+ {
+  "q": "When did the configuration format change, and to what?",
+  "facts": [
+   "June 2023",
+   "from YAML to TOML"
+  ]
+ },
+ {
+  "q": "When was support for hyperlinks (OSC 8) added?",
+  "facts": [
+   "July 2022"
+  ]
+ },
+ {
+  "q": "What is alacritty_config_derive and when did it appear?",
+  "facts": [
+   "December 2020",
+   "a derive macro crate for configuration deserialization"
+  ]
+ },
+ {
+  "q": "When was vi mode added?",
+  "facts": [
+   "2020"
+  ]
+ },
+ {
+  "q": "Who are the main contributors?",
+  "facts": [
+   "Christian Duerr",
+   "Joe Wilm",
+   "Kirill Chibisov"
+  ]
+ },
+ {
+  "q": "Does Alacritty have tabs?",
+  "facts": [
+   "no tab management of its own",
+   "macOS native tabs, added July 2023"
+  ]
+ },
+ {
+  "q": "When was the IPC config subcommand added?",
+  "facts": [
+   "August 2022"
+  ]
+ },
+ {
+  "q": "What is alacritty_terminal responsible for?",
+  "facts": [
+   "the terminal emulation library",
+   "grid, parser and PTY, separate from the UI"
+  ]
+ },
+ {
+  "q": "When did scrollback land?",
+  "facts": [
+   "2017",
+   "faux scrollback config option in December 2017"
+  ]
+ },
+ {
+  "q": "What is the most recent release in this history?",
+  "facts": [
+   "0.17.0"
+  ]
+ },
+ {
+  "q": "When were split panes added?",
+  "facts": [
+   "there are none"
+  ],
+  "unanswerable": true
+ }
+]

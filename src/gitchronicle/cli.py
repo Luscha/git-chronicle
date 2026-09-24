@@ -346,18 +346,69 @@ def mcp_cmd(config: str = _Config,
 
 
 @app.command(name="inspect")
-def inspect_cmd(query: str = typer.Argument(..., help="A path, a filename, or a word"),
+def inspect_cmd(query: str = typer.Argument("", help="A path, a filename, a word, or \"A -> B\""),
                 config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
-                plain: bool = typer.Option(False, "--files", help="Just the paths, one per line")):
+                plain: bool = typer.Option(False, "--files", help="Just the paths, one per line"),
+                gaps: bool = typer.Option(False, "--unclaimed",
+                                          help="Files nobody owns that carry an entry's name")):
     """Who owns these files, what they were built for, and what belongs with them."""
     from .scope import Scope
-    from .serve.inspect import file_card, find, split_hint
+    from .serve.inspect import file_card, find, split_hint, unclaimed
+    from .taxonomy.ledger import Ledger
     cfg, _ = _setup(config, repo, rev, db)
     kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
     if not Path(kb).exists():
         console.print(f"[yellow]No knowledge base at {kb} — run `gitchronicle update`.[/]")
         raise typer.Exit(1)
     conn, repo_path, sc = connect(kb), cfg["repo"]["path"], Scope.load()
+    if gaps:
+        rows = unclaimed(conn, repo_path, scope=sc, ledger=Ledger.load(),
+                         entry=query or None, limit=60)
+        if not rows:
+            console.print("[green]Nothing unowned carries an entry's name.[/]")
+            return
+        _head(f"{sum(r['n'] for r in rows)} files nobody owns carry an entry's name")
+        for r in rows:
+            _log(f"  {r['entry']}  [{r['tier'] or '-'}]")
+            for f in r["files"][:8 if query else 5]:
+                k = f["commits"]
+                ev = f"{k} commit{'s' if k != 1 else ''}" if k else "—"
+                also = "  also: " + ", ".join(f["also"]) if f["also"] else ""
+                _log(f"     {f['path']:<52} {ev}{also}")
+        _log("")
+        _log("  Claim them in the studio's Review, or write "
+             '`claim <path>` under the entry in gitchronicle.plan.')
+        return
+    if not query:
+        console.print("[yellow]Give a path, a filename or a word — or --unclaimed.[/]")
+        raise typer.Exit(1)
+    if "->" in query:
+        # why two entries are linked: the references behind the edge, file by file
+        from .taxonomy.relations import edge_evidence
+        src, _, dst = query.partition("->")
+        src, dst = src.strip().strip('"'), dst.strip().strip('"')
+        why = conn.execute(
+            "SELECT e.why FROM domain_edges e JOIN domains s ON s.id=e.src_domain "
+            "JOIN domains d ON d.id=e.dst_domain WHERE s.name=? AND d.name=?",
+            (src, dst)).fetchone()
+        refs = edge_evidence(conn, repo_path, src, dst)
+        if not why and not refs:
+            console.print(f"[yellow]no link from {src!r} to {dst!r}[/]")
+            raise typer.Exit(1)
+        _head(f"{src}  ->  {dst}")
+        _log(f"  {why[0] if why else 'no edge in the catalogue'}")
+        seen: dict = {}
+        for r in refs:
+            seen.setdefault(r["file"], []).append(f"{r['ref']} -> {r['target']}")
+        for f, rs in list(seen.items())[:20]:
+            _log(f"    {f}")
+            for r in rs[:3]:
+                _log(f"        imports {r}")
+        if not refs:
+            _log("    (no import says so — stated in the plan, or it no longer resolves)")
+        _log("")
+        _log(f'  Not a relation? Write   not-uses  "{src}" -> "{dst}"   in gitchronicle.plan')
+        return
     found = find(conn, query, scope=sc)
     if plain:
         for f in found["files"]:
@@ -367,10 +418,12 @@ def inspect_cmd(query: str = typer.Argument(..., help="A path, a filename, or a 
         console.print(f"[yellow]nothing matches {query!r}[/]")
         raise typer.Exit(1)
     if len(found["files"]) == 1 or "/" in query:
-        card = file_card(conn, found["files"][0], repo_path)
+        card = file_card(conn, found["files"][0], repo_path, ledger=Ledger.load())
         _head(card["path"])
         e = card["entry"]
         _log(f"  owned by: {e['name'] + ' [' + (e['tier'] or '') + ']' if e else '(no entry)'}")
+        for w in card.get("why") or []:
+            _log(f"    because {w}")
         if card["chapters"]:
             _log("  told in: " + "; ".join(f"{c['title']} ({c['start'][:7]})" for c in card["chapters"][:4]))
         if card["concerns"]:

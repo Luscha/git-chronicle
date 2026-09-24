@@ -81,3 +81,10 @@ def test_render_round_trips():
 def test_bad_rules_are_refused_with_a_line_number(text):
     with pytest.raises(LedgerError):
         Ledger.parse(text)
+
+
+def test_a_refusal_follows_a_rename():
+    """not-uses names entries, and a merge renames one — the verdict has to come along."""
+    from gitchronicle.taxonomy.ledger import Ledger
+    led = Ledger.parse('not-uses   "Old Name" -> "Luna"\nmerge  "Old Name" -> "New Name"\n')
+    assert led.rejected_relations() == [("New Name", "Luna")]

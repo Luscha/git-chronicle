@@ -17,6 +17,39 @@
   direction. Correcting a misfiled framework went from seven panels to one pass.
 - **`ignore <word>`** in the ledger, for vocabulary you have looked at and judged to name
   nothing — the queue's equivalent of `keep-split`.
+- **Files nobody owns that carry an entry's name** — a third review queue, and the gap the
+  other two cannot see: the catalogue names the thing and holds none of its code, because a
+  word several entries answer to identifies none of them. `char_affect.cpp`, in 135 commits,
+  belonged to nothing and nothing said so; 134 such files here, `gitchronicle inspect
+  --unclaimed`, and the `entry` MCP tool now tells an agent about them too.
+- **Files come INTO an entry** — its Files tab could push files out and never pull them in.
+  Search from inside the entry, tick, add; the rules are written per source entry exactly as
+  the Files view writes them.
+- **Rust**: `use` and `mod` are read as imports, and a module path is resolved to its
+  module rather than its type (Rust's own snake_case/CamelCase convention says which is
+  which). Alacritty produced **zero** dependency links before this.
+- **A chapter carries what happened after it** — how long the work then stopped, and which
+  of the entry's own files stopped existing — and its work items are dated. The battle pass
+  was switched off in a commit whose summary says "battlepass gets removed", and the story
+  said "a battle pass quest removal feature was implemented"; it now says the system was
+  removed in August 2021 and that nothing followed for 20 months. Measured: the fact is
+  right where it was wrong, at −3 ± 2 points on a 17-question eval, because dated evidence
+  pulls the narration toward chronology (`docs/measurements.md`).
+- **Stories** — a studio view for the one action that spends money: how many entries have
+  no story, which ones, and a narrate button that says what it will cost you.
+- **An import resolves only to a file its own syntax could name**, and only to one that
+  still exists at HEAD. `#include "config.h"` was reaching `config.js` in a web panel: 85 of
+  227 edges on the reference repository were that collision, and two of the six biggest
+  hubs were made of it. Stated as an exclusion, so unknown extensions (`.fx`, `.forge`)
+  resolve as before.
+- **Every link and every file says why** — a link opens into the references behind it, file
+  by file; a file says whether a rule, the work filed under the entry, or its own name put
+  it there. In the studio, in `gitchronicle inspect`, and in the `entry` MCP tool.
+- **Narration from the studio** — the one action that spends money, named as such, with the
+  number of entries still without a story standing in the sidebar.
+- **`not-uses` removes a link**, rather than only stopping the studio proposing it. Every
+  link now shows the evidence behind it and can be taken back from the entry's Links tab,
+  and a relation no import can show can be stated there as well.
 
 ## 0.5.0
 

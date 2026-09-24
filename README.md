@@ -49,22 +49,25 @@ writes as it goes, so the last month is queryable minutes in.
 |---|---|
 | `update` | ingest what is new and rebuild. `--chronicle` also narrates. The one to schedule |
 | `init` | draft the scope map — which paths are the product — for you to review |
-| `studio` | the local web app: ask, browse, graph, timeline, curate |
+| `studio` | the local web app: ask, browse, graph, timeline, curate, narrate |
 | `ask` | one question, answered with citations |
 | `mcp` | serve the knowledge base to coding agents (stdio) |
 | `doctor` | check git, the repository, the scope and every model role |
 | `cost` | what the runs cost, per stage; `--estimate N` before they run |
 | `eval` | grade the answers against facts you already know |
 | `ledger` | the curation file: draft one, or open it in `$EDITOR` |
-| `inspect` | one file or one word: who owns it, what it was built for, what belongs with it |
+| `inspect` | one file or one word: who owns it, **why**, what it was built for, what belongs with it. `"A -> B"`: the imports behind a link. `--unclaimed`: files nobody owns that carry an entry's name |
 
 ## What you get
 
 - **A catalogue** — every feature, framework, tool and content area, with its files, its
   tier, when it was born and when it was last touched.
 - **A story per entry** — chapters cut at real breaks in the work, narrated from the
-  commits' own evidence, with the commits behind each one.
-- **A dependency graph** — what is built on what, from imports rather than guesses.
+  commits' own evidence, with the commits behind each one, and told plainly when the work
+  stopped or the files went away.
+- **A dependency graph** — what is built on what, from imports rather than guesses, plus
+  the relations you state and minus the ones you judge wrong. Every link shows the
+  references behind it, file by file.
 - **Answers** — `gitchronicle ask`, citing entries and commits.
 - **Exports** — `kb.html` and per-entry markdown, for reading or publishing.
 
@@ -84,22 +87,28 @@ entry "Locale Strings"
   claim  locale/strings/** from "Quest Content" # take only that entry's files
 merge  "Wiki Builder Tabs" -> "Wiki Manager"
 reject "Constinfo System"                       # never propose it again
+not-uses "Item System" -> "Locale Strings"      # not a relation: drop that link
 keep-split client/ui/**                         # shared on purpose; stop asking
 ignore raii                                     # a word that names nothing; stop asking
 ```
 
-The **studio** is where this is comfortable. *Review* has two halves: folders the catalogue
-split across several entries, and **words that run through the work and name no entry** —
+The **studio** is where this is comfortable. *Review* has three queues: folders the catalogue
+split across several entries, **files nobody owns that carry an entry's name** — the
+catalogue naming a thing while holding none of its code — and **words that run through the work and name no entry** —
 the assembly's residue made visible, which is how a missing framework announces itself
 rather than hiding in a log line. Each word can become an entry, be dismissed with
-`ignore <word>`, or turn out to be a scope rule that is not taking effect. Beyond that, an entry's *Files* tab lets you tick
-folders and assign them elsewhere; *Save & rebuild* applies it. Commits and stories follow
+`ignore <word>`, or turn out to be a scope rule that is not taking effect. Beyond that, an
+entry's *Files* tab lets you tick folders and assign them elsewhere, or search the whole
+repository and pull files in; *Save & rebuild* applies it. Curation is free — replay costs
+milliseconds and no model calls. Narration is the one paid action, so it has a place of its
+own: **Stories** says how many entries have none, which ones, and what a run will spend
+before it starts. Commits and stories follow
 the files. Replay is pure, so re-graining costs milliseconds and no model calls. A full
 example is in [`examples/ledger.plan`](examples/ledger.plan).
 
 ### Files: surgical curation
 
-Both review queues look for work that is *unfiled*. A framework whose files are scattered
+The review queues look for work that is *unfiled*. A framework whose files are scattered
 across seven entries is **misfiled**, and no queue can see it — every one of its files has
 an owner. The studio's **Files** view works at that grain: search a path, a filename or a
 word, and every match appears with whoever owns it today.
@@ -114,8 +123,45 @@ Clicking a path shows what it was built for (the work items behind it), which ch
 its story, and what changes with it. The same data is a command (`gitchronicle inspect
 <path|word>`) and an MCP tool, so an agent can ask before it edits code.
 
+The same search runs from inside an entry, so files come **in** as well as out: the rules
+are written per source entry either way, and a file nobody owns is claimed outright.
+
 *Measured*: a trait framework whose 8 files sat across 5 entries became one entry in a
-single pass — search, tick, name, save.
+single pass — search, tick, name, save. An entry that held three utility files took its
+seven real ones, and the entry that had two of them released them, in one pass and 46
+seconds of replay — no model calls.
+
+### The gap neither queue can see
+
+Those ask what is *unfiled* or *misfiled*. Neither can see a file that is simply
+**absent**: the catalogue names the thing and holds none of its code. That happens for a
+reason the tool is right about — a word several entries answer to identifies none of them,
+so four entries carrying "affect" left `char_affect.cpp` (135 commits) to nobody — and the
+refusal was silent. Review says it out loud, for every entry whose name a
+file carries word for word, with how many of that entry's own commits touched it. On the
+reference repository: 134 files, led by `raid_manager.cpp` (60 commits) and `pvp_arena.cpp`
+(38), none of them owned by anything. `gitchronicle inspect --unclaimed` prints the same
+list, and the `entry` MCP tool tells an agent about the ones under its nose.
+
+### Why is this here?
+
+Territory and links are inferred, so both can be wrong, and a conclusion you cannot
+interrogate is one you cannot correct. Every file in an entry answers **why it is here** —
+a rule you wrote, the work items filed under the entry that changed it, or its own name —
+next to what it was built for and what it changes with. Every link opens into the
+references that made it: *`SpotLightDebugPanel.cpp` → `dynamiclightmanager` →
+`DynamicLightManager.cpp`*. If the answer is unconvincing, `not-uses` removes the link and
+the next rebuild keeps it removed. The same two answers are a command and an MCP tool —
+`gitchronicle inspect <path>` and `gitchronicle inspect "Debug Panel -> Rhi Rendering"` —
+so an agent can weigh a link before believing it.
+
+That view paid for itself immediately. A link from a server feature to the web admin panel
+turned out to rest on `#include "config.h"` resolving to `config.js`: references were
+matched by filename across the whole repository, with no notion of language. A reference
+now resolves only to a file its own syntax could be naming, and only to one that still
+exists — stated as an exclusion, so `.fx` including `.fxh`, or a `.forge` script requiring
+a `.lua` library, keeps working. On the reference repository that removed **85 of 227
+import edges**, and two of the six biggest "frameworks" turned out to be collisions.
 
 ### Scope: what is the product
 
@@ -149,10 +195,13 @@ the narration should read.
 claude mcp add chronicle -- gitchronicle mcp --config /abs/path/config.toml
 ```
 
-Five read-only tools: `search`, `entry`, `inspect` (a file or a word: owner, the work behind
-it, what changes with it, and framework-versus-users when several match), `path_history` (which entry owns a file and why it
-looks the way it does — worth calling before changing code) and `period` (what happened in
-a given year). They return evidence, not conclusions; the agent does its own reasoning.
+Five read-only tools: `search`, `entry` (its story, its links with the evidence for each,
+and the files nobody owns that carry its name), `inspect` (a file: owner, *why* that entry
+holds it, the work behind it, what changes with it — a word: every match with its owner and
+framework-versus-users — or `"A -> B"`: the imports behind a link), `path_history` (which
+entry owns a file and why it looks the way it does — worth calling before changing code)
+and `period` (what happened in a given year). They return evidence, not conclusions; the
+agent does its own reasoning.
 
 ## Models
 
@@ -187,8 +236,10 @@ fact by fact, sampling every question several times:
  {"q": "When was VR support added?", "facts": ["there is none"], "unanswerable": true}]
 ```
 
-It scores 91% on a 15-year private fork and 83% on [httpie](https://github.com/httpie/cli),
-whose question set ships in [`eval/httpie.json`](eval/httpie.json).
+It scores 96% on [alacritty](https://github.com/alacritty/alacritty) (2,493 commits of
+Rust, built in 13 minutes), 90% on a 15-year private fork and 83% on
+[httpie](https://github.com/httpie/cli); both public question sets ship in
+[`eval/`](eval/).
 [The numbers, and what they cost](docs/measurements.md).
 
 ## Privacy
@@ -200,8 +251,10 @@ Worth checking before pointing it at a private codebase, and before publishing a
 
 ## Limits
 
-- The decomposition was tuned on one repository. On httpie it is weaker: some generic
-  entry names, one entry mixing tests and CLI, few dependency links.
+- The decomposition was tuned on one repository. Elsewhere it is weaker, and the *answers*
+  hide it: alacritty scores 96% on questions while a third of its entries are named after
+  directories and its dependency graph has 8 links. Expect to curate names and territory on
+  a repository the tool has not seen.
 - Un-curated entries re-cluster as history grows. That is why curation lives in rules over
   paths rather than in the database.
 - Narration is grounded in each commit's own evidence but not verified sentence by

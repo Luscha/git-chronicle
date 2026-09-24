@@ -24,6 +24,74 @@ answer could name the wrong owner and still look supported. The extra links are 
 effect: import edges between territories that were previously hidden inside a
 double-owned file resolve into real edges once ownership is single.
 
+## An import edge is only as good as the name it resolves
+
+Import targets were matched by basename across the whole repository, with no notion of
+language. `#include "config.h"` in a server file resolved to `config.js` in the web admin
+panel; `import sys` resolved to a `sys.*` that had been deleted years earlier and still sat
+in the history-derived territory.
+
+| | before | after |
+|---|---|---|
+| `uses` edges | 234 | **163** |
+| entries with no link | 122 | 132 |
+| biggest hubs | Luna (35), Italy Tour (29), Game Wiki (29), UniversalCore (19), CCC (19) | Game Wiki (29), Luna (19), UniversalCore (13), Rhi Rendering (11) |
+
+Two of the five biggest "frameworks" were made of collisions. The fix is a rule about
+syntax, not a list of names: a reference may only resolve to a file its own import form
+could be naming, and only to one that still exists at HEAD. Stated as an exclusion, so
+shader `#include`s of `.fxh` and `.forge` scripts requiring `.lua` libraries survive — both
+were verified to still resolve after the change.
+
+## A third repository: Alacritty, and what the score does not measure
+
+2,493 commits of Rust over ten years, a language the pipeline had never seen. The whole
+build took 13 minutes, of which untangling 2,454 commits was 4.9.
+
+| | httpie | void-queue | **alacritty** |
+|---|---|---|---|
+| eval | 83% | 90% ± 1 | **96% ± 3** |
+
+The one failed question was a bad question: asked whether Alacritty has tabs, the knowledge
+base answered that it has no tab management of its own but supports macOS native tabs since
+July 2023 (`bfcebbcd38`, shipped 0.12.3) — verified in the repository, and a finer
+distinction than the question allowed.
+
+**And the catalogue behind that 96% is the weakest of the three.** A third of its entries
+are named after directories (`ref`, `res`, `osx`, `wix`), twenty of sixty are upkeep
+buckets, the most-edited files in the project (`term/mod.rs`, 174 commits) belong to no
+entry, and the dependency graph had **no edges at all** until Rust imports were added, then
+8. Answers ride on untangled work items, attribution and chapters; entry names and edges
+make the catalogue browsable. The two are much more independent than they look, and an eval
+score alone will not tell you the catalogue is poor.
+
+## Narration reports what it is told, and only that
+
+The battle pass was switched off on 2021-08-21 by a commit whose own untangled summary is
+"battlepass gets removed". The chapter containing it was titled "Introduced and Refined",
+and the story said "a battle pass quest removal feature was implemented" — a death told as
+a shipment. Nothing was missing from retrieval: in v0.4 that chapter ended at the removal
+and was titled "Battle Pass UI, Quests, and Removal", and it only stopped doing so because
+attribution grew and the arc swallowed the event.
+
+Two facts were then added to every chapter's evidence — how long the work stopped
+afterwards, and which of the entry's own files no longer exist — and its work items were
+dated.
+
+| | eval | "removed in August 2021" | contradictions/run |
+|---|---|---|---|
+| before | 91% ± 0 | absent | 1.0 |
+| + boundaries | 90% ± 1 | mentioned, misdated ("late October") | 1.3 |
+| + dated work items | 85% ± 0 | **stated** | 2.0 |
+| + "dates place events, they are not the story" | 88% ± 2 | **stated** | 1.7 |
+
+Dating every work item made the narration more precise and less descriptive: the skill-tree
+answer became one exact sentence and dropped which sides were implemented. Saying so in the
+prompt recovered most of it. The net against the original is −3 ± 2 points for a removal
+that is finally reported and correctly dated — worth it for a tool whose claim is *what was
+built and what replaced it*, and the honest way to read it is that these two configurations
+are within each other's error bars.
+
 ## What is not the product is worth more than any clustering tweak
 
 The scope map decides which paths the pipeline may look at. Left alone, `init` drafts it

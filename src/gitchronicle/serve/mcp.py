@@ -45,11 +45,14 @@ TOOLS = [
          "required": ["path"]}},
     {"name": "inspect",
      "description": "Everything known about one file, or about every file whose path carries a "
-                    "word: which entry owns each, what work they were part of, what changes with "
-                    "them, and — when several match — which of them are the framework and which "
-                    "only use it. Ask before moving code, or when a feature seems to be missing.",
+                    "word: which entry owns each, why that entry holds it, what work they were "
+                    "part of, what changes with them, and — when several match — which of them "
+                    "are the framework and which only use it. Given \"A -> B\" instead, it "
+                    "answers why those two entries are linked, file by file. Ask before moving "
+                    "code, when a feature seems to be missing, or when a link looks wrong.",
      "inputSchema": {"type": "object", "properties": {
-         "query": {"type": "string", "description": "A repo-relative path, a filename, or a word"}},
+         "query": {"type": "string", "description": "A repo-relative path, a filename, a word, "
+                                                   "or \"Entry A -> Entry B\""}},
          "required": ["query"]}},
     {"name": "period",
      "description": "What happened in the project during a year or date range: most active "
@@ -105,10 +108,14 @@ class KB:
                 return f"No entry named {name!r}." + (f" Did you mean: {', '.join(hits)}?"
                                                       if hits else "")
             did = d["id"]
-            uses = [r[0] for r in c.execute("SELECT t.name FROM domain_edges e JOIN domains t "
-                                            "ON t.id=e.dst_domain WHERE e.src_domain=?", (did,))]
-            used = [r[0] for r in c.execute("SELECT s.name FROM domain_edges e JOIN domains s "
-                                            "ON s.id=e.src_domain WHERE e.dst_domain=?", (did,))]
+            # with the reason: an import edge is evidence, not a fact, and an agent that
+            # cannot see what it rests on cannot weigh it
+            uses = [f"{r[0]} ({r[1]})" if r[1] else r[0] for r in c.execute(
+                "SELECT t.name, e.why FROM domain_edges e JOIN domains t "
+                "ON t.id=e.dst_domain WHERE e.src_domain=?", (did,))]
+            used = [f"{r[0]} ({r[1]})" if r[1] else r[0] for r in c.execute(
+                "SELECT s.name, e.why FROM domain_edges e JOIN domains s "
+                "ON s.id=e.src_domain WHERE e.dst_domain=?", (did,))]
             authors = [f"{r[0]} ({r[1]})" for r in c.execute(
                 "SELECT c.author_name, COUNT(*) FROM commit_domains cd JOIN commits c "
                 "ON c.hash=cd.commit_hash WHERE cd.domain_id=? AND c.is_merge=0 "
@@ -133,8 +140,14 @@ class KB:
             f"authors: {', '.join(authors) or 'unknown'}",
             f"uses: {', '.join(uses) or 'nothing catalogued'}",
             f"used by: {', '.join(used) or 'nothing catalogued'}",
-            "main folders: " + ", ".join(f"{k}/ ({n})" for k, n in top),
-            "", "## Story"]
+            "main folders: " + ", ".join(f"{k}/ ({n})" for k, n in top)]
+        gap = self._unclaimed(name)
+        if gap:
+            # the catalogue's own blind spot, said out loud: an agent that reads only the
+            # territory would conclude these files are nobody's
+            lines.append("unclaimed files carrying this name (nobody owns them): "
+                         + ", ".join(f["path"] for f in gap[:10]))
+        lines += ["", "## Story"]
         for ch in chapters:
             n = len(json.loads(ch["commit_hashes"] or "[]"))
             lines.append(f"### {(ch['period_start'] or '')[:10]} .. {(ch['period_end'] or '')[:10]}"
@@ -144,9 +157,52 @@ class KB:
             lines.append("(not narrated yet)")
         return "\n".join(lines)
 
+    def _link(self, query: str) -> str:
+        """Why two entries are linked — the references, not the verdict. An import can be
+        one constant, so an agent that cannot see the evidence cannot weigh the edge."""
+        from ..taxonomy.relations import edge_evidence
+        src, _, dst = query.partition("->")
+        src, dst = src.strip().strip('"'), dst.strip().strip('"')
+        with self.db() as c:
+            why = c.execute(
+                "SELECT e.why FROM domain_edges e JOIN domains s ON s.id=e.src_domain "
+                "JOIN domains d ON d.id=e.dst_domain WHERE s.name=? AND d.name=?",
+                (src, dst)).fetchone()
+            refs = edge_evidence(c, self.repo, src, dst) if self.repo else []
+        if not why and not refs:
+            return f"No link from {src!r} to {dst!r}."
+        out = [f"# {src} -> {dst}", (why[0] if why else "no edge in the catalogue"), ""]
+        by: dict = {}
+        for r in refs:
+            by.setdefault(r["file"], []).append(f"{r['ref']} -> {r['target']}")
+        for f, rs in list(by.items())[:20]:
+            out.append(f"{f}")
+            out += [f"    imports {r}" for r in rs[:3]]
+        if not refs:
+            out.append("(no import says so: stated in gitchronicle.plan, or the imports that "
+                       "created it no longer resolve)")
+        return "\n".join(out)
+
+    def _unclaimed(self, name: str) -> list:
+        from pathlib import Path
+
+        from ..scope import Scope
+        from ..taxonomy.ledger import Ledger
+        from .inspect import unclaimed
+        sc = Scope.load(self.scope_path) if self.scope_path else None
+        # the plan sits beside the scope map, and an agent's server starts from anywhere:
+        # without it, files a rule claims but no rebuild has applied read as unowned
+        led = Ledger.load(Path(self.scope_path).with_name("gitchronicle.plan")) \
+            if self.scope_path else None
+        with self.db() as c:
+            rows = unclaimed(c, self.repo, scope=sc, ledger=led, entry=name)
+        return rows[0]["files"] if rows else []
+
     def inspect(self, query: str) -> str:
         from ..scope import Scope
         from .inspect import file_card, find, split_hint
+        if "->" in query:
+            return self._link(query)
         with self.db() as c:
             sc = Scope.load(self.scope_path)
             found = find(c, query, scope=sc)

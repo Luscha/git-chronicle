@@ -70,6 +70,7 @@ mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px }
 .sidefoot { margin-top:auto; border-top:1px solid var(--line); padding:14px 8px 0;
   font-size:12px; color:var(--muted); display:grid; gap:4px }
 .sidefoot b { color:var(--fg-2); font-weight:600 }
+.sidefoot .narr { margin-top:2px; padding-top:6px; border-top:1px dashed var(--line) }
 #main { overflow:auto; position:relative }
 .page { max-width:1180px; margin:0 auto; padding:34px 40px 120px }
 .page.wide { max-width:none; padding:0; height:100% }
@@ -271,6 +272,8 @@ svg.focus .edge.hot { stroke:var(--acc); stroke-opacity:.9 }
 .explain { background:var(--sunken); border-radius:9px; padding:12px 14px; font-size:12.5px; color:var(--fg-2); line-height:1.55 }
 .explain b { font-weight:600 }
 .links { display:grid; grid-template-columns:1fr 1fr; gap:20px }
+.links > div { min-width:0 }
+.links.wide { grid-template-columns:1fr }   /* paths need the width the two columns take */
 .links h4 { font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600; margin-bottom:8px }
 .lk { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px }
 .lk:hover { background:var(--sunken) }
@@ -290,6 +293,13 @@ svg.focus .edge.hot { stroke:var(--acc); stroke-opacity:.9 }
 .hold .b { height:5px; border-radius:3px; background:var(--acc); opacity:.5 }
 .acts { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
 .rule { padding:12px 16px; display:flex; gap:14px; align-items:flex-start }
+.rule.click { cursor:pointer }
+.rule.click:hover { background:var(--sunken) }
+.stats { display:flex; gap:30px; margin:4px 0 2px }
+.stats > div { display:flex; flex-direction:column; gap:2px }
+.stats b { font-size:21px; font-weight:600; letter-spacing:-.02em }
+.stats span { font-size:11.5px; color:var(--muted) }
+.stats .warn b { color:var(--warn) }
 .rule + .rule { border-top:1px solid var(--line-2) }
 .rule .body { flex:1; min-width:0 }
 .rule .body b { font-weight:600 }
@@ -309,6 +319,35 @@ textarea.plan:focus { border-color:var(--acc) }
 .frow .ck { accent-color:var(--acc); cursor:pointer; flex:none }
 .frow .p { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; flex:1 }
 .frow .why { font-family:var(--sans); font-size:11.5px; color:var(--faint); flex:none }
+.flist { margin:2px 0 12px; max-height:240px; overflow:auto }
+.tr .whyb { padding:1px 6px; font-size:10.5px; opacity:0; transition:opacity .12s; flex:none }
+.tr:hover .whyb { opacity:.7 }
+.tr .whyb:hover { opacity:1 }
+.whyx { margin:2px 0 8px; padding:10px 12px; border-left:2px solid var(--line); background:var(--sunken);
+  border-radius:0 8px 8px 0; font-size:12.5px }
+.whyx .sec { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint);
+  font-weight:600; margin:10px 0 3px }
+.whyx .sec:first-child { margin-top:0 }
+.whyx .it { font-size:12px; color:var(--fg-2); padding:1px 0 }
+.whyx .it span { color:var(--faint) }
+.whyx .reasons { display:grid; gap:3px; color:var(--fg-2); margin-bottom:2px }
+.whyx .reasons div::before { content:"— "; color:var(--faint) }
+.fcard .reasons { display:grid; gap:3px; color:var(--fg-2); font-size:12.5px }
+.fcard .reasons div::before { content:"— "; color:var(--faint) }
+.pull { margin:14px 0 4px }
+.pull > div { margin-top:6px }
+.lk .grow { display:flex; align-items:center; gap:8px; flex:1; min-width:0 }
+.lk .btn.xs { padding:2px 7px; font-size:11px; opacity:.45; flex:none }
+.lk:hover .btn.xs { opacity:1 }
+.links .why { font-size:11.5px; color:var(--faint); padding:0 8px 6px 30px }
+.links .why.open { cursor:pointer }
+.links .why .reveal { color:var(--acc); opacity:0; transition:opacity .12s }
+.lkw:hover .why .reveal { opacity:1 }
+.links .ev { padding:0 8px 8px 30px; display:grid; gap:7px }
+.links .evrow .p { font-family:var(--mono); font-size:11.5px; color:var(--fg-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.links .evrow .p .muted { font-size:10.5px }
+.links .evrow .t { font-family:var(--mono); font-size:11px; color:var(--faint); padding-left:14px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .bucket { border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin:8px 0 }
 .bucket h4 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600 }
 .bucket p { font-size:12.5px; color:var(--muted); margin:2px 0 8px }
@@ -372,6 +411,7 @@ body.dopen #dock, body.dopen #pvpop { left:calc((100vw - min(600px,100vw) + 232p
     <div class="navi" data-v="timeline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h9M7 12h12M5 18h8"/></svg>Timeline</div>
     <div class="navh">Curate</div>
     <div class="navi" data-v="review"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Review<span class="count" id="nRev"></span></div>
+    <div class="navi" data-v="stories"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v17H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M8 7h7M8 11h5"/></svg>Stories<span class="count" id="nStory"></span></div>
     <div class="navi" data-v="scope"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2"/></svg>Scope<span class="count" id="nScope"></span></div>
     <div class="navi" data-v="rules"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>Rules<span class="count" id="nRul"></span></div>
     <div class="sidefoot" id="foot"></div>
@@ -407,7 +447,7 @@ const TIER_HELP = {
 const SETTABLE = TIERS.filter(t => t !== "inherited" && t !== "upkeep");
 let S = null;                     // the state served by /api/state
 let planText = "", savedPlan = "", dirty = 0;
-let byName = new Map(), uses = new Map(), usedBy = new Map();
+let byName = new Map(), uses = new Map(), usedBy = new Map(), edgeWhy = new Map();
 let route = { view: "ask", entry: null };
 const pendingMoves = [];          // decompositions made this session, shown on the tree
 
@@ -483,20 +523,21 @@ async function load() {
   const tl = S.timeline;
   const y0 = tl.start ? tl.start.slice(0, 4) : "";
   const y1 = tl.start ? String(+y0 + Math.floor((+tl.start.slice(5, 7) - 1 + tl.months - 1) / 12)) : "";
-  $("foot").replaceChildren(
+  $("foot").replaceChildren(...[
     h("div", null, h("b", null, fmt(S.catalogue.length)), " entries · ", h("b", null, fmt(S.edges.length)), " links"),
     h("div", null, h("b", null, fmt(S.chapters)), " chapters · ", h("b", null, fmt(S.commits)), " commits"),
-    h("div", null, y0 + " – " + y1));
+    h("div", null, y0 + " – " + y1)].filter(Boolean));
   render();
 }
 
 function index() {
   byName = new Map(S.catalogue.map(r => [r.name, r]));
-  uses = new Map(); usedBy = new Map();
+  uses = new Map(); usedBy = new Map(); edgeWhy = new Map();
   for (const e of S.edges) {
     if (!uses.has(e.src)) uses.set(e.src, []);
     if (!usedBy.has(e.dst)) usedBy.set(e.dst, []);
     uses.get(e.src).push(e.dst); usedBy.get(e.dst).push(e.src);
+    edgeWhy.set(e.src + "\u0000" + e.dst, e.why || "");
   }
   const dl = $("entrynames"); dl.textContent = "";
   for (const n of [...byName.keys()].sort((a, b) => a.localeCompare(b))) dl.append(new Option(n));
@@ -505,8 +546,12 @@ function index() {
   // the queue is both halves: folders split apart, and words nothing answers to
   const open = (S.trees || []).filter(t => !t.handled).length
              + (S.vocab || []).filter(v => !ignoredWords().includes(v.word)).length
-             + (S.relhints || []).filter(r => !statedPairs().some(p => p[0] === r.src && p[1] === r.dst)).length;
+             + (S.relhints || []).filter(r => !statedPairs().some(p => p[0] === r.src && p[1] === r.dst)).length
+             + (S.unclaimed || []).filter(u => u.files.some(f => !claimedNow(f.path))).length;
   $("nRev").textContent = open || "";
+  const waiting = (S.unnarrated || []).length;
+  $("nStory").textContent = waiting || "";
+  $("nStory").className = "count" + (waiting ? " hot" : "");
 }
 
 // ---------- routing: #view or #view/Entry Name -----------------------------------------
@@ -1223,7 +1268,11 @@ async function paintStory(body, r) {
   if (st.authors && st.authors.length) body.insertBefore(h("div", { class: "authors" }, "Mostly by ",
     st.authors.slice(0, 3).map((a, i) => [i ? ", " : "", h("b", null, a.name), " (" + a.n + ")"])), box);
   if (!st.chapters || !st.chapters.length) {
-    box.append(h("div", { class: "explain" }, "This entry has not been narrated yet. Run ", h("span", { class: "mono" }, "gitchronicle update --chronicle"), "."));
+    box.append(h("div", { class: "explain" }, "No story yet. Narrating reads this entry's commits and writes its "
+      + "chapters — the one thing here that calls the model.",
+      S.can_rebuild ? h("div", { class: "acts", style: "margin-top:10px" },
+        h("button", { class: "btn pri", onclick: () => narrate() }, "Narrate")) : h("div", { class: "hint" },
+        "Run ", h("span", { class: "mono" }, "gitchronicle update --chronicle"), ".")));
     return;
   }
   let yr = null;
@@ -1277,6 +1326,11 @@ function paintFiles(body, r) {
     h("b", null, "Sort this entry's files into the entries they really belong to. "),
     "Tick folders or files, then ", h("b", null, "assign"), " them to an entry — an existing one or a new name — or ",
     h("b", null, "remove"), " them when they were never part of anything here. Each assignment becomes a rule, and the commits and story follow the files on the next rebuild."));
+  const incoming = pendingMoves.filter(m => m.to === r.name);
+  if (incoming.length) body.append(h("div", { class: "card", style: "padding:10px 14px;margin-top:12px;font-size:12.5px" },
+    h("b", null, "Coming in when you save"), h("div", { style: "margin-top:4px" },
+      h("span", { class: "tag ok" }, "+ " + incoming.length + " file" + (incoming.length === 1 ? "" : "s")), " ",
+      h("span", { class: "mono muted" }, incoming.map(m => m.path).join(", ")))));
   const mine = pendingMoves.filter(m => m.from === r.name);
   if (mine.length) {
     const byTo = {};
@@ -1286,7 +1340,10 @@ function paintFiles(body, r) {
         to ? h("span", { class: "tag ok" }, "→ " + to) : h("span", { class: "tag warn" }, "removed"), " ",
         fmt(ms.reduce((t, m) => t + m.n, 0)) + " files: ", h("span", { class: "mono muted" }, ms.map(m => m.path).join(", "))))));
   }
-  if (!r.files.length) { body.append(h("div", { class: "empty" }, "No files.")); return; }
+  const gap = unclaimedFor(r.name);
+  if (gap) body.append(unclaimedCard(gap, true));
+  body.append(pullBox(r));
+  if (!r.files.length) { body.append(h("div", { class: "empty" }, "No files yet — claim the ones above, or search for them.")); return; }
 
   const bar = h("div", { class: "pickbar" });
   body.append(bar);
@@ -1313,9 +1370,12 @@ function paintFiles(body, r) {
       h("span", { class: "nm", title: node.path, onclick: () => isDir ? toggle() : cb.click() }, node.name + (isDir ? "/" : "")),
       isDir ? h("span", { class: "bar", style: "--tc:" + tcol(r.tier) + ";width:" + Math.max(3, node.n / max * 90) + "px" }) : null,
       pm ? h("span", { class: "tag " + (pm.to ? "ok" : "warn") }, pm.to ? "→ " + pm.to : "removed") : null,
+      isDir ? null : h("button", { class: "btn ghost xs whyb", title: "Why is this file here?",
+        onclick: e => { e.stopPropagation(); openWhy(node.path, r.name); } }, whyFor === node.path ? "close" : "why"),
       h("span", { class: "n" }, isDir ? fmt(node.n) : ""));
     const toggle = () => { open ? openDirs.delete(key) : openDirs.add(key); drawer(r.name); };
     box.append(el);
+    if (!isDir && whyFor === node.path) box.append(whyBlock(depth));
     if (isDir && open) {
       const kids = [...node.kids.values()].sort((a, b) => (a.file - b.file) || b.n - a.n || a.name.localeCompare(b.name));
       kids.slice(0, 300).forEach(k => row(k, depth + 1));
@@ -1324,6 +1384,91 @@ function paintFiles(body, r) {
   [...tree.kids.values()].sort((a, b) => b.n - a.n).forEach(k => row(k, 0));
   body.append(box);
   paintPickBar(bar, r);
+}
+
+// Files leave an entry from here; until now nothing brought them IN, so pulling
+// affect_manager.cpp into Affect System meant leaving the entry for the Files view and
+// finding it again by hand. Same rules, same writing — one less place to go.
+let pullQ = "", pullHits = null, pullFor = null;
+const pullPicked = new Set();
+function pullBox(r) {
+  if (pullFor !== r.name) { pullQ = ""; pullHits = null; pullPicked.clear(); pullFor = r.name; }
+  const box = h("div", { class: "pull" });
+  const inp = h("input", { class: "field", placeholder: "Add files — search a name, a path or a word", value: pullQ, style: "width:100%" });
+  const out = h("div");
+  let t = null;
+  const run = async () => {
+    const q = pullQ;
+    if (!q.trim()) { pullHits = null; draw(); return; }
+    const res = await (await fetch("/api/inspect?q=" + encodeURIComponent(q))).json();
+    if (q !== pullQ) return;
+    pullHits = res; draw();
+  };
+  inp.addEventListener("input", () => { pullQ = inp.value; clearTimeout(t); t = setTimeout(run, 220); });
+  function draw() {
+    out.replaceChildren();
+    if (!pullHits) { if (pullQ.trim()) out.append(h("div", { class: "hint" }, "Searching…")); return; }
+    const own = new Map();
+    for (const g of pullHits.entries) for (const f of g.files) own.set(f, g.name || null);
+    const rows = pullHits.files.filter(f => own.get(f) !== r.name).slice(0, 40);
+    if (!rows.length) { out.append(h("div", { class: "hint" }, "Nothing else matches — or this entry holds them all already.")); return; }
+    for (const f of rows) {
+      const cb = h("input", { type: "checkbox", class: "ck", checked: pullPicked.has(f) });
+      cb.addEventListener("change", () => { cb.checked ? pullPicked.add(f) : pullPicked.delete(f); row.classList.toggle("sel", cb.checked); bar(); });
+      const o = own.get(f);
+      const row = h("div", { class: "frow" + (pullPicked.has(f) ? " sel" : "") }, cb,
+        h("span", { class: "p", title: f, onclick: () => cb.click() }, f),
+        h("span", { class: "why" }, o ? "in " + o : "nobody owns it"));
+      out.append(row);
+    }
+    if (pullHits.total > rows.length) out.append(h("div", { class: "hint" }, pullHits.total - rows.length + " more — narrow the search."));
+    out.append(acts); bar();
+  }
+  const add = h("button", { class: "btn pri" }, "Add");
+  const acts = h("div", { class: "acts", style: "margin-top:8px" }, add,
+    h("button", { class: "btn ghost", onclick: () => { pullPicked.clear(); draw(); } }, "Clear"));
+  const bar = () => { add.textContent = "Add " + pullPicked.size + " file" + (pullPicked.size === 1 ? "" : "s") + " to " + r.name; add.disabled = !pullPicked.size; };
+  add.onclick = async () => {
+    if (!pullPicked.size) return;
+    const paths = [...pullPicked];
+    pullPicked.clear();
+    await assignFiles(paths, r.name, null, pullHits);
+    drawer(r.name);
+  };
+  box.append(inp, out);
+  draw();
+  return box;
+}
+
+let whyFor = null, whyCard = null;
+async function openWhy(path, entry) {
+  if (whyFor === path) { whyFor = null; whyCard = null; return drawer(entry); }
+  whyFor = path; whyCard = null;
+  drawer(entry);
+  const card = await (await fetch("/api/inspect?file=" + encodeURIComponent(path))).json();
+  if (whyFor !== path) return;
+  whyCard = card; drawer(entry);
+}
+function whyBlock(depth) {
+  const box = h("div", { class: "whyx", style: "margin-left:" + (14 + depth * 16) + "px" });
+  if (!whyCard) { box.append(h("div", { class: "hint" }, "reading…")); return box; }
+  const c = whyCard;
+  box.append(h("div", { class: "sec" }, "why it is here"),
+    h("div", { class: "reasons" }, (c.why || []).map(w => h("div", null, w))));
+  if (c.concerns && c.concerns.length) {
+    box.append(h("div", { class: "sec" }, "built for"));
+    c.concerns.slice(0, 4).forEach(x => box.append(h("div", { class: "it" },
+      h("span", null, x.date + "  "), x.label, x.entry && x.entry !== (c.entry || {}).name ? h("span", null, "  → " + x.entry) : null)));
+  }
+  if (c.cochanged && c.cochanged.length) {
+    box.append(h("div", { class: "sec" }, "changes with"));
+    c.cochanged.slice(0, 4).forEach(x => box.append(h("div", { class: "it" }, h("span", null, x.n + "×  "), x.path,
+      x.entry ? h("span", null, "  (" + x.entry + ")") : null)));
+  }
+  box.append(h("div", { class: "acts", style: "margin-top:8px" },
+    h("button", { class: "btn ghost", onclick: () => { fileQ = c.path; fileHits = null; fileFocus = c.path; fileCard = c; go("files"); runFiles(); } },
+      "open in Files →")));
+  return box;
 }
 
 function paintPickBar(bar, r) {
@@ -1472,14 +1617,69 @@ function tidyPlan() {
 function addLine(text) { planText = planText.replace(/\s*$/, "") + "\n\n" + text + "\n"; dirty++; }
 
 function paintLinks(body, r) {
-  const up = (uses.get(r.name) || []).slice().sort(), down = (usedBy.get(r.name) || []).slice().sort();
-  const lk = n => { const c = byName.get(n); return h("div", { class: "lk", onclick: () => openEntry(n) }, dotEl(c && c.tier), n); };
+  const dropped = refusedPairs(), said = usesPairs();
+  const live = (a, b) => !dropped.some(p => p[0] === a && p[1] === b);
+  const inDb = n => (uses.get(r.name) || []).includes(n);
+  const up = [...new Set((uses.get(r.name) || []).concat(
+    said.filter(p => p[0] === r.name).map(p => p[1])))].sort().filter(n => live(r.name, n));
+  const down = (usedBy.get(r.name) || []).slice().sort().filter(n => live(n, r.name));
+  // the evidence behind each link, and the verdict that removes it: an import can be one
+  // constant, and until now a wrong edge was one nothing in the tool could take back
+  const lk = (n, src, dst) => {
+    const c = byName.get(n), why = (edgeWhy.get(src + "\u0000" + dst) || "");
+    const mine = said.some(p => p[0] === src && p[1] === dst);
+    const el = h("div", { class: "lk" }, h("span", { class: "grow", onclick: () => openEntry(n) }, dotEl(c && c.tier), n),
+      mine && !inDb(dst) ? h("span", { class: "tag ok" }, "when you save") : null,
+      h("button", { class: "btn ghost xs", title: "Not a relation — remove this link", onclick: async e => {
+        e.stopPropagation();
+        // a link this plan states is removed by deleting the statement; one the imports
+        // found needs the verdict written down, or the next rebuild infers it again
+        if (mine) dropUses(src, dst); else addLine('not-uses   "' + src + '" -> "' + dst + '"');
+        await afterEdit();
+        el.replaceChildren(h("span", { class: "muted" }, n), h("span", { class: "tag ok" }, "✓ removed"));
+      } }, "not a link"));
+    const wrap = h("div", { class: "lkw" }, el);
+    if (!why) return wrap;
+    const ev = h("div", { class: "ev" });
+    // the reason is one line until you ask for it; the files behind it are what let you
+    // judge whether the link is real, and one of the first ones looked at was not
+    const more = h("div", { class: "why open", onclick: () => toggle() }, why,
+      inDb(dst) ? h("span", { class: "reveal" }, "  which imports?") : null);
+    let shown = false;
+    const toggle = async () => {
+      if (!inDb(dst)) return;
+      shown = !shown;
+      ev.replaceChildren();
+      const cols = wrap.closest(".links");
+      if (cols) cols.classList.toggle("wide", shown || !!cols.querySelector(".ev > *"));
+      if (!shown) return;
+      ev.append(h("div", { class: "hint" }, "reading the files…"));
+      const r = await (await fetch("/api/why?src=" + encodeURIComponent(src) + "&dst=" + encodeURIComponent(dst))).json();
+      const by = new Map();
+      for (const x of r.refs || []) { if (!by.has(x.file)) by.set(x.file, new Map()); by.get(x.file).set(x.target, x.ref); }
+      ev.replaceChildren(...(by.size ? [...by].map(([f, tg]) => h("div", { class: "evrow" },
+        h("div", { class: "p" }, f.split("/").pop(), h("span", { class: "muted" }, "  " + f)),
+        [...tg].map(([t, ref]) => h("div", { class: "t" }, "→ ", h("b", null, ref), "  ", t))))
+        : [h("div", { class: "hint" }, /stated/.test(why)
+            ? "No import says so — you stated this link in the plan."
+            : "No import resolves to it any more: the next rebuild drops this link.")]));
+    };
+    wrap.append(more, ev);
+    return wrap;
+  };
   body.append(h("div", { class: "links" },
-    h("div", null, h("h4", null, "Uses · " + up.length), up.length ? up.map(lk) : h("div", { class: "muted" }, "Nothing it imports is catalogued.")),
-    h("div", null, h("h4", null, "Used by · " + down.length), down.length ? down.map(lk) : h("div", { class: "muted" }, "Nothing depends on it."))));
+    h("div", null, h("h4", null, "Uses · " + up.length), up.length ? up.map(n => lk(n, r.name, n)) : h("div", { class: "muted" }, "Nothing it imports is catalogued.")),
+    h("div", null, h("h4", null, "Used by · " + down.length), down.length ? down.map(n => lk(n, n, r.name)) : h("div", { class: "muted" }, "Nothing depends on it."))));
+  const add = h("input", { class: "field", list: "entrynames", placeholder: "It uses… (an entry no import shows)", style: "flex:1;min-width:220px" });
+  const state = async () => { const v = add.value.trim();
+    if (!v || v === r.name || !byName.has(v)) { toast("Name an entry it uses."); return; }
+    addToEntry(r.name, ['  uses   "' + v + '"']); await afterEdit(); drawer(r.name); toast(r.name + " uses " + v + " — save to apply"); };
+  add.addEventListener("keydown", e => { if (e.key === "Enter") state(); });
   body.append(h("div", { class: "hint", style: "margin-top:18px" },
     "A link is code in one entry importing a file owned by the other — or a relation you stated "
-    + "with ", h("span", { class: "mono" }, 'uses "…"'), " in the plan, for the ones no import shows."));
+    + "with ", h("span", { class: "mono" }, 'uses "…"'), " in the plan, for the ones no import shows. "
+    + "Links are between entries, never between single files."),
+    h("div", { class: "acts", style: "margin-top:8px" }, add, h("button", { class: "btn", onclick: state }, "Add link")));
   if (up.length + down.length) body.append(h("button", { class: "btn", style: "margin-top:12px", onclick: () => go("graph", r.name) }, "Show in graph"));
 }
 
@@ -1523,16 +1723,65 @@ function paintCurate(body, r) {
 // =========================================================================================
 // REVIEW
 // =========================================================================================
+async function renderStories(main) {
+  // a narration started from the terminal is the same run: ask the server rather than
+  // trusting what this page happens to have seen
+  if (S.can_rebuild) {
+    try { rebuildState = await (await fetch("/api/rebuild")).json(); } catch (e) { /* offline */ }
+    if (rebuildState && rebuildState.running && route.view === "stories") setTimeout(() => render(), 4000);
+  }
+  const page = h("div", { class: "page", style: "max-width:980px" });
+  const waiting = S.unnarrated || [];
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Stories"),
+    h("p", null, "Every entry's history, narrated from its own commits and cut at the real breaks in the work. "
+      + "This is the one thing in the studio that calls a model: chapters already written are reused, so a run "
+      + "pays only for what curation changed."))));
+  page.append(h("div", { class: "stats" },
+    h("div", null, h("b", null, fmt(S.chapters)), h("span", null, "chapters")),
+    h("div", null, h("b", null, fmt(S.catalogue.length - waiting.length)), h("span", null, "entries with a story")),
+    h("div", { class: waiting.length ? "warn" : "" }, h("b", null, fmt(waiting.length)), h("span", null, "waiting"))));
+  if (rebuildState && rebuildState.running) {
+    page.append(h("div", { class: "card pad" }, h("span", { class: "spin" }),
+      h("b", { style: "margin-left:8px" }, rebuildState.narrating ? "Narrating…" : "Rebuilding…"),
+      h("div", { class: "hint", style: "margin-top:6px" }, rebuildState.stage || "")));
+  } else if (!waiting.length) {
+    page.append(h("div", { class: "card pad" }, h("b", null, "Every entry has a story."),
+      h("div", { class: "hint", style: "margin-top:4px" }, "Curation that moves files rewrites the entries it touches — they come back here when it does.")));
+  } else {
+    const act = h("div", { class: "acts", style: "margin:14px 0 18px" });
+    if (S.can_rebuild) act.append(h("button", { class: "btn pri", onclick: () => narrate() },
+      "Narrate " + waiting.length + " entr" + (waiting.length === 1 ? "y" : "ies")));
+    else act.append(h("div", { class: "hint" }, "Run ", h("span", { class: "mono" }, "gitchronicle update --chronicle"), " to narrate them."));
+    page.append(act);
+    const box = h("div", { class: "card" });
+    for (const e of waiting) box.append(h("div", { class: "rule click", onclick: () => openEntry(e.name, "story") },
+      dotEl(e.tier), h("div", { class: "body" }, h("b", null, e.name),
+        h("span", { class: "muted" }, "  " + fmt(e.commits) + " commit" + (e.commits === 1 ? "" : "s")
+          + (e.born ? " · " + span(e.born, e.last) : ""))),
+      h("span", { class: "tag warn" }, "no story")));
+    page.append(box);
+  }
+  main.append(page);
+}
+
 function renderReview(main) {
   const page = h("div", { class: "page", style: "max-width:980px" });
   const open = S.trees.filter(t => !t.handled), done = S.trees.filter(t => t.handled);
   page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Review"),
-    h("p", null, "Folders the catalogue split across several entries, most suspicious first: no entry owns most of it, "
-      + "and nothing is named after it. If the files are one thing you built, make them one entry; if they are different "
-      + "things that share a folder, mark it as correctly split."))));
+    h("p", null, "What the catalogue could not decide by itself: files nobody owns although they carry an entry's name, "
+      + "relations your own stories assert, words that run through the work and name nothing, and folders split across "
+      + "several entries. Each is a question with its evidence attached; answering it writes a rule."))));
   const vocab = (S.vocab || []).filter(v => !ignoredWords().includes(v.word));
   const rel = (S.relhints || []).filter(r => !statedPairs().some(p => p[0] === r.src && p[1] === r.dst));
-  if (!open.length && !vocab.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  const gaps = (S.unclaimed || []).map(u => ({ ...u, files: u.files.filter(f => !claimedNow(f.path)) })).filter(u => u.files.length);
+  if (!open.length && !vocab.length && !gaps.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  if (gaps.length) {
+    page.append(h("div", { class: "rgroup" }, "Files nobody owns that carry an entry's name"));
+    page.append(h("div", { class: "hint", style: "margin:-2px 0 10px" },
+      "The catalogue names the thing but holds none of its code. A word several entries answer to "
+      + "identifies none of them, so these files were left out of every territory — quietly."));
+    for (const u of gaps.slice(0, 8)) page.append(unclaimedCard(u));
+  }
   if (rel.length) {
     page.append(h("div", { class: "rgroup" }, "Relations your stories assert and no import shows"));
     page.append(h("div", { class: "hint", style: "margin:-2px 0 10px" },
@@ -1568,6 +1817,82 @@ function statedPairs() {
     else if (m[2] !== undefined && cur) out.push([cur, m[2]]);
     else if (m[3] !== undefined) out.push([m[3], m[4]]);
   }
+  return out;
+}
+
+// paths a rule in the buffer already gives to someone: the queue must not keep offering
+// a file the owner has just claimed but not yet saved
+function claimedNow(path) {
+  return parsePlan(planText).some(b => b.kind === "entry" && b.claims.some(g => g === path || g.split(" from ")[0].trim() === path));
+}
+function unclaimedFor(name) {
+  const u = (S.unclaimed || []).find(x => x.entry === name);
+  if (!u) return null;
+  const files = u.files.filter(f => !claimedNow(f.path));
+  return files.length ? { ...u, files } : null;
+}
+function unclaimedCard(u, compact) {
+  const c = h("div", { class: "card rv vocab" });
+  const acts = h("div", { class: "acts" });
+  const on = new Set(u.files.map(f => f.path));
+  const rows = u.files.map(f => {
+    const cb = h("input", { type: "checkbox", class: "ck", checked: true });
+    cb.addEventListener("change", () => { cb.checked ? on.add(f.path) : on.delete(f.path); count(); });
+    return h("div", { class: "frow" }, cb, h("span", { class: "p", title: f.path }, f.path),
+      h("span", { class: "why" }, (f.commits ? f.commits + " of its commits touch it" : "not in its commits")
+        + (f.also.length ? " · also matches " + f.also.join(", ") : "")));
+  });
+  const claim = h("button", { class: "btn pri" }, "Claim");
+  const count = () => claim.textContent = "Claim " + on.size + " file" + (on.size === 1 ? "" : "s");
+  count();
+  claim.onclick = async () => {
+    if (!on.size) return;
+    addToEntry(u.entry, [...on].map(f => "  claim  " + f));
+    await afterEdit();
+    c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ claimed by " + u.entry));
+    if (compact) drawer(u.entry);
+  };
+  c.append(compact ? h("h4", null, "Files nobody owns that carry this name")
+                   : h("div", { class: "w" }, u.entry, h("span", { class: "muted", style: "font-weight:400" }, "  owns none of these  ")));
+  c.append(h("div", { class: "facts" }, h("span", null, u.n + " file" + (u.n === 1 ? "" : "s") + " carry its name"),
+      h("span", null, u.worked_on + " touched by its own commits")),
+    h("div", { class: "flist" }, rows), acts);
+  acts.append(claim,
+    h("button", { class: "btn", title: "They are on their own on purpose — stop proposing them",
+      onclick: async () => {
+        for (const f of u.files) addLine("keep-split " + f.path);
+        await afterEdit();
+        c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ left alone"));
+        if (compact) drawer(u.entry);
+      } }, "Not its files"),
+    ...(compact ? [] : [h("button", { class: "btn ghost", onclick: () => openEntry(u.entry, "files") }, "open entry →")]));
+  return c;
+}
+
+// `uses` lines in the buffer, so a link stated a moment ago is visible before the rebuild
+function usesPairs() {
+  const out = [], re = /^entry\s+"([^"]*)"|^\s+uses\s+"([^"]*)"/gm;
+  let cur = null, m;
+  while ((m = re.exec(planText))) {
+    if (m[1] !== undefined) cur = m[1];
+    else if (cur) out.push([cur, m[2]]);
+  }
+  return out;
+}
+function dropUses(src, dst) {
+  const blocks = parsePlan(planText), b = blocks.find(x => x.kind === "entry" && x.name === src);
+  if (!b) return;
+  const lines = planText.split("\n");
+  for (let i = b.from; i <= b.to; i++)
+    if (new RegExp('^\\s+uses\\s+"' + dst.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"').test(lines[i])) lines[i] = null;
+  // an entry block whose only line was that statement is not an entry, it is residue
+  if (!lines.slice(b.from + 1, b.to + 1).some(l => l !== null && l.trim())) lines[b.from] = null;
+  planText = lines.filter(l => l !== null).join("\n"); dirty++;
+}
+
+function refusedPairs() {
+  const out = [], re = /^not-uses\s+"([^"]*)"\s*->\s*"([^"]*)"/gm;
+  let m; while ((m = re.exec(planText))) out.push([m[1], m[2]]);
   return out;
 }
 
@@ -1803,11 +2128,12 @@ function assignBox() {
       h("button", { class: "btn ghost", onclick: () => { filePicked.clear(); drawFiles(); } }, "Clear")), hint);
 }
 
-async function assignFiles(paths, to, newTier) {
+async function assignFiles(paths, to, newTier, hits) {
   // one rule per source entry, so each release is scoped to the entry that holds it
+  hits = hits || fileHits;
   const bySource = new Map();
   for (const p of paths) {
-    const owner = (fileHits.entries.find(g => g.files.includes(p)) || {}).name || null;
+    const owner = (hits.entries.find(g => g.files.includes(p)) || {}).name || null;
     if (!bySource.has(owner)) bySource.set(owner, []);
     bySource.get(owner).push(p);
   }
@@ -1817,10 +2143,11 @@ async function assignFiles(paths, to, newTier) {
     for (const f of fs) claims.push("  claim  " + f + (owner && owner !== to ? ' from "' + owner + '"' : ""));
   }
   addToEntry(to, claims.concat(newTier ? ["  tier   " + newTier] : []));
+  for (const [owner, fs] of bySource) for (const f of fs) pendingMoves.push({ from: owner, path: f, to, n: 1 });
   filePicked.clear();
   await afterEdit();
   drawFiles();
-  toast("Assigned " + paths.length + " files to " + to + " — save to apply");
+  toast("Assigned " + paths.length + " file" + (paths.length === 1 ? "" : "s") + " to " + to + " — save to apply");
 }
 
 async function loadCard(path) {
@@ -1837,6 +2164,10 @@ function cardBox() {
     h("div", { class: "hint" }, c.entry
       ? ["owned by ", h("a", { onclick: () => openEntry(c.entry.name) }, c.entry.name), " · " + c.entry.tier]
       : "owned by no entry"));
+  if (c.why && c.why.length) {
+    box.append(h("div", { class: "sec" }, "why it is here"));
+    box.append(h("div", { class: "reasons" }, c.why.map(w => h("div", null, w))));
+  }
   if (c.chapters && c.chapters.length) {
     box.append(h("div", { class: "sec" }, "told in"));
     c.chapters.slice(0, 4).forEach(x => box.append(h("div", { class: "it" }, x.title,
@@ -2015,7 +2346,9 @@ async function preview() {
 function dock() {
   const d = $("dock");
   if (rebuildState && rebuildState.running) {
-    d.replaceChildren(h("span", { class: "spin" }), h("span", null, "Rebuilding the knowledge base" + (rebuildState.stage ? " — " + rebuildState.stage : "") + "…"));
+    d.replaceChildren(h("span", { class: "spin" }), h("span", null,
+      (rebuildState.narrating ? "Rebuilding and narrating" : "Rebuilding the knowledge base")
+      + (rebuildState.stage ? " — " + rebuildState.stage : "") + "…"));
     d.classList.add("show"); return;
   }
   if (rebuildState && rebuildState.code != null && rebuildState.code !== 0) {
@@ -2030,7 +2363,7 @@ function dock() {
     d.replaceChildren(...[h("span", { title: "Nothing changes until you save" + (S.can_rebuild ? " and rebuild" : "") }, h("b", null, "Unsaved " + what)),
       planText !== savedPlan ? h("button", { class: "btn", onclick: togglePreview }, pvOpen ? "Hide preview" : "Preview") : null,
       h("button", { class: "btn", onclick: () => { planText = savedPlan; dirty = 0; pendingMoves.length = 0; scopeEdits.clear(); pvOpen = false; $("pvpop").classList.remove("show"); afterEdit().then(() => { render(); drawer(route.entry); }); } }, "Discard"),
-      h("button", { class: "btn pri", onclick: save }, S.can_rebuild ? "Save & rebuild" : "Save")].filter(Boolean));
+      h("button", { class: "btn pri", onclick: () => save() }, S.can_rebuild ? "Save & rebuild" : "Save")].filter(Boolean));
     d.classList.add("show");
   } else d.classList.remove("show");
 }
@@ -2056,13 +2389,30 @@ function toast(msg) {
   const t = h("div", { class: "card", style: "position:fixed;top:16px;right:16px;padding:10px 14px;z-index:70;font-size:13px;box-shadow:var(--shadow)" }, "✓ " + msg);
   document.body.append(t); setTimeout(() => t.remove(), 2200);
 }
-async function save() {
+// The only button in the studio that spends money. It says so, it says how much work is
+// waiting, and it never happens as a side effect of saving.
+async function narrate() {
+  const n = (S.unnarrated || []).length;
+  if (!confirm("Narrate " + n + " entr" + (n === 1 ? "y" : "ies") + " that have no story yet?\n\n"
+      + "This is the one action here that calls the model: one pass per entry, and chapters "
+      + "already written are reused. Everything else in the studio is free.")) return;
+  if (planText !== savedPlan) await save(false);
+  await fetch("/api/rebuild", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chronicle: true }) });
+  pollRebuild();
+  if (route.view === "stories") render();
+}
+
+async function save(rebuild = true) {
   if (scopeEdits.size) await saveScope();
   const r = planText === savedPlan ? {} : await (await fetch("/api/save", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ plan: planText }) })).json();
   if (r.error) { showErr(r.error); return; }
   savedPlan = planText; dirty = 0; pvOpen = false; $("pvpop").classList.remove("show");
+  // narrate saves first and then starts ONE run of its own: two starts race, and the
+  // second is refused while the first is still going
+  if (!rebuild) { dock(); return; }
   if (!S.can_rebuild) { toast("Saved — run  gitchronicle update  to rebuild"); dock(); return; }
   await fetch("/api/rebuild", { method: "POST" });
   pollRebuild();
@@ -2077,7 +2427,7 @@ async function pollRebuild() {
   }
 }
 
-const VIEWS = { ask: renderAsk, catalogue: renderCatalogue, files: renderFiles, graph: renderGraph, timeline: renderTimeline, review: renderReview, scope: renderScope, rules: renderRules };
+const VIEWS = { ask: renderAsk, catalogue: renderCatalogue, files: renderFiles, graph: renderGraph, timeline: renderTimeline, review: renderReview, stories: renderStories, scope: renderScope, rules: renderRules };
 route = parseHash();
 load().then(async () => {
   const d = $("drawer"); d.style.transition = "none";      // a reload lands open, it does not slide

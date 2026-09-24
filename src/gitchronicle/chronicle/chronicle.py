@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from datetime import datetime
+from functools import lru_cache
 
 from ..extract.git_ingest import run_git
 from ..scope import Direction
@@ -31,9 +32,14 @@ _CHAP_SYS_BASE = (
     "work items (per-commit concerns untangled from the diffs: label + what changed), the "
     "key files touched, and possibly a representative diff. Write that chapter of the "
     "domain's history: concrete, specific, past tense, grounded ONLY in the evidence. Name "
-    "the actual mechanisms, subsystems and files that changed. NEVER pad with filler like "
+    "the actual mechanisms, subsystems and files that changed — the dates are there to "
+    "place events, not to be the story, so never let a chronology crowd out WHAT changed. "
+    "NEVER pad with filler like "
     "'various improvements', 'several changes', 'enhancements were made' — if the evidence "
-    "is thin, write one short precise sentence instead. Respond with ONE JSON object.")
+    "is thin, write one short precise sentence instead. When the evidence says the work "
+    "STOPPED after this window, or that files stopped existing, say so plainly in the "
+    "narrative — a thing going quiet or being taken out is part of its story, not an "
+    "omission. Respond with ONE JSON object.")
 CHAP_SYS = _CHAP_SYS_BASE
 _DIR_KEY = ""
 
@@ -89,6 +95,54 @@ def _domain_concerns(conn, domain_id) -> dict:
             out[r["commit_hash"]].append(f"{lab}: {summ[:220]}")
         elif lab or summ:
             out[r["commit_hash"]].append((lab or summ)[:220])
+    return out
+
+
+@lru_cache(maxsize=4)
+def _alive(repo: str) -> frozenset:
+    """The files HEAD still has. Once per run: both narration passes ask per domain."""
+    return frozenset(run_git(repo, ["ls-files"], check=False).splitlines()) if repo else frozenset()
+
+
+def _boundaries(conn, repo: str, domain_id: int, chapters: list) -> list[dict]:
+    """What happened AFTER each chapter — the half of an arc the evidence never carried.
+
+    The battle pass was switched off in a commit whose own summary says "battlepass gets
+    removed"; the chapter ran two more months past it and was narrated as "Introduced and
+    Refined". The story was not missing the commit, it was missing the fact that the work
+    then stopped for twenty months and that the quest file is not in the repository today.
+    Both are deterministic, and neither existed anywhere in the prompt.
+    """
+    alive = _alive(repo)
+    last = conn.execute("SELECT MAX(authored_at) FROM commits WHERE is_merge=0").fetchone()[0]
+    end = _epoch(last)
+    out = []
+    for i, ch in enumerate(chapters):
+        nxt = chapters[i + 1][0]["t"] if i + 1 < len(chapters) else end
+        gap = (nxt - ch[-1]["t"]) / 86400
+        # NOT the chapter's territory files: territory is built from the worktree, so a
+        # file that was removed cannot be in it, and the one fact worth reporting would be
+        # the one fact structurally unable to appear. Not the commits' files either — a
+        # multi-feature commit would hand this story three other features' deletions. The
+        # domain's own work items name their own files, which is the slice that is his.
+        hashes = [c["hash"] for c in ch]
+        qm = ",".join("?" * len(hashes))
+        mine: list[str] = []
+        for r in conn.execute(
+                f"SELECT files FROM concerns WHERE domain_id = ? AND commit_hash IN ({qm})",
+                (domain_id, *hashes)):
+            mine += json.loads(r["files"] or "[]")
+        gone = [p for p in dict.fromkeys(mine) if p not in alive]
+        # and it must have been last touched HERE, or every later chapter inherits the
+        # removal of a file it merely happened to touch once
+        if gone:
+            qm2 = ",".join("?" * len(gone))
+            last_touch = {r["path"]: _epoch(r["d"]) for r in conn.execute(
+                f"SELECT cf.path, MAX(c.authored_at) d FROM commit_files cf "
+                f"JOIN commits c ON c.hash = cf.commit_hash WHERE cf.path IN ({qm2}) "
+                "GROUP BY cf.path", tuple(gone))}
+            gone = [p for p in gone if last_touch.get(p, 0) <= ch[-1]["t"] + 1]
+        out.append({"gap_days": gap, "last": i + 1 == len(chapters), "gone": gone[:6]})
     return out
 
 
@@ -228,7 +282,7 @@ def _repo_chronicle(conn, provider, log, force):
 
 
 
-def _chapter_prompt(conn, repo, did, name, ch, concerns) -> tuple[str, str]:
+def _chapter_prompt(conn, repo, did, name, ch, concerns, edge=None) -> tuple[str, str]:
     """The chapter's prompt and its cache key.
 
     Shared by the prefetch and the write pass so the two can never drift: a prefetch that
@@ -240,21 +294,34 @@ def _chapter_prompt(conn, repo, did, name, ch, concerns) -> tuple[str, str]:
     own commit range identifies the same work across rebuilds, which is the same reason
     the ledger keys on names.
     """
-    # evidence: this domain's own work items; raw subject only as fallback
+    # evidence: this domain's own work items, DATED; raw subject only as fallback. Without
+    # the date the narrator can only place an event at the chapter's edge: it correctly
+    # reported the battle pass being removed and dated it to the chapter's last day, two
+    # months after the commit that did it.
     lines = []
     for c in ch[:14]:
         own = concerns.get(c["hash"])
+        d = c["date"][:10]
         if own:
-            lines += [f"- {w}" for w in own[:2]]
+            lines += [f"- {d}  {w}" for w in own[:2]]
         else:
-            lines.append(f"- {c['subject'][:160]}")
+            lines.append(f"- {d}  {c['subject'][:160]}")
     subj = "\n".join(lines)
     files = _chapter_files(conn, did, [c["hash"] for c in ch])
     diff = _diff_of(conn, repo, did, [c["hash"] for c in ch]) if len(ch) <= 4 else ""
     want = "4-7 sentences" if len(ch) >= 5 else "2-4 sentences"
+    after = ""
+    if edge:
+        months = int(edge["gap_days"] / 30.4)
+        if edge["gap_days"] > _DORMANT_DAYS:
+            after = (f"\n\nWhat happened next: no further work on this domain for "
+                     f"{months} months" + (" — nothing since." if edge["last"] else "."))
+        if edge["gone"]:
+            after += ("\n\nFiles last touched here that are NOT in the repository today:\n"
+                      + "\n".join(f"  {f}" for f in edge["gone"]))
     user = (f"Domain: {name}\nPeriod: {ch[0]['date'][:10]} .. {ch[-1]['date'][:10]} "
             f"({len(ch)} commits)\nWork items:\n{subj}\n\nKey files touched:\n"
-            + "\n".join(f"  {f}" for f in files)
+            + "\n".join(f"  {f}" for f in files) + after
             + f"\n\nRepresentative diff:\n{diff or '(none)'}"
             + '\n\nReturn JSON: {"title":"<=6 word period title",'
             + f'"narrative":"the story, {want}"}}')
@@ -282,9 +349,11 @@ def _prefetch(conn, provider, repo, doms, workers, log) -> None:
         if not commits:
             continue
         concerns = _domain_concerns(conn, did)
-        for ch in _cluster(commits):
+        chapters = _cluster(commits)
+        edges = _boundaries(conn, repo, did, chapters)
+        for ch, edge in zip(chapters, edges):
             if len(ch) > 1:
-                jobs.append(_chapter_prompt(conn, repo, did, d["name"], ch, concerns))
+                jobs.append(_chapter_prompt(conn, repo, did, d["name"], ch, concerns, edge))
     if not jobs:
         return
     log(f"    warming {len(jobs)} chapter narrations ({workers} workers) ...")
@@ -357,8 +426,10 @@ def _narrate(conn, provider, repo, doms, force, log) -> tuple[int, list[str]]:
         # rows are collected first and written together: an entry is narrated whole or
         # not at all, so a cache-only run never leaves half a story behind
         rows, narratives = [], []
+        chapters = _cluster(commits)
+        edges = _boundaries(conn, repo, did, chapters)
         try:
-            for seq, ch in enumerate(_cluster(commits)):
+            for seq, (ch, edge) in enumerate(zip(chapters, edges)):
                 if len(ch) == 1:
                     # one commit needs no narration — its own concern (or message) IS
                     # the chapter, and the concern is already this domain's slice
@@ -373,7 +444,7 @@ def _narrate(conn, provider, repo, doms, force, log) -> tuple[int, list[str]]:
                                  [c0["hash"][:10]]))
                     narratives.append(body0 or c0["subject"])
                     continue
-                user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns)
+                user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns, edge)
                 try:
                     r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key,
                                       role="narration", stage="narration")

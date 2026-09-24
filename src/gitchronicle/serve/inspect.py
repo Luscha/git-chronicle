@@ -14,6 +14,7 @@ answers never drift.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from collections import Counter, defaultdict
@@ -66,11 +67,11 @@ def find(conn, query: str, limit: int = 60, scope=None) -> dict:
             "total": len(seen), "shown": len(files)}
 
 
-def file_card(conn, path: str, repo: str = "") -> dict:
+def file_card(conn, path: str, repo: str = "", ledger=None) -> dict:
     """One file: its owner, the work it was part of, its story, and its neighbours."""
     row = conn.execute(
-        "SELECT d.name, d.tier, d.id FROM domain_files f JOIN domains d ON d.id = f.domain_id "
-        "WHERE f.path = ?", (path,)).fetchone()
+        "SELECT d.name, d.tier, d.id, f.source FROM domain_files f "
+        "JOIN domains d ON d.id = f.domain_id WHERE f.path = ?", (path,)).fetchone()
     entry = {"name": row["name"], "tier": row["tier"]} if row else None
 
     concerns = [{"label": r["label"], "summary": (r["summary"] or "")[:200],
@@ -113,8 +114,30 @@ def file_card(conn, path: str, repo: str = "") -> dict:
             co[r["path"]] = r["n"]
 
     return {"path": path, "entry": entry, "concerns": concerns, "commits": commits,
-            "chapters": chapters,
+            "chapters": chapters, "why": _why_owned(row, path, concerns, ledger),
             "cochanged": [{"path": p, "n": n, "entry": _owner_of(conn, p)} for p, n in co.most_common(8)]}
+
+
+def _why_owned(row, path: str, concerns: list, ledger=None) -> list[str]:
+    """Why this entry holds this file — the question a graph of 6,000 files invites and
+    nothing could answer. Territory comes from three places and they read identically in
+    the catalogue: a rule you wrote, the work attached to the file, and its own name."""
+    if row is None:
+        return []
+    why, name = [], row["name"]
+    if ledger is not None and ledger.owner(path) == name:
+        glob = next((g for e in ledger.entries if e.name == name for g in e.claims
+                     if fnmatch.fnmatch(path, g)), path)
+        why.append(f"a rule in your plan claims it: claim {glob}")
+    mine = sum(1 for c in concerns if c["entry"] == name)
+    if mine:
+        why.append(f"{mine} work item{'s' if mine != 1 else ''} filed under “{name}” changed it")
+    if all(w in _stem_words(path) for w in _name_words(name)):
+        why.append(f"its name carries “{name}”")
+    if not why:
+        why.append("the commits it appears in are mostly this entry's"
+                   if row["source"] == "history" else "it came with this entry's territory")
+    return why
 
 
 def _owner_of(conn, path: str) -> str | None:
@@ -196,3 +219,92 @@ def split_hint(conn, repo: str, query: str, scope=None) -> dict:
             "clients": clients,
             "rest": [p for p in paths if p not in core and p not in clients],
             "outside_users": inc.get("outside_users", 0)}
+
+
+# Words that name a KIND of thing rather than the thing, so they carry no identity of
+# their own: "Affect System" is about affects, and every second entry ends in "System".
+_GENERIC = {"system", "the", "and", "for", "with"}
+
+
+def _name_words(name: str) -> list[str]:
+    """The words of an entry's name a filename could plausibly carry."""
+    ws = [w for w in re.split(r"[^a-z0-9]+", name.lower()) if len(w) > 2]
+    keep = [w for w in ws if w not in _GENERIC]
+    return keep or ws              # an entry called only "Manager" still gets to match
+
+
+def _stem_words(path: str) -> set[str]:
+    base = path.rsplit("/", 1)[-1]
+    stem = base.rsplit(".", 1)[0] if "." in base[1:] else base
+    return {w for w in re.split(r"[^a-z0-9]+", stem.lower()) if w}
+
+
+def unclaimed(conn, repo: str = "", scope=None, ledger=None, entry: str | None = None,
+              limit: int = 12) -> list[dict]:
+    """Files no entry owns whose own NAME carries an entry's name.
+
+    Both review queues ask what is *unfiled* and the Files view asks what is *misfiled*;
+    neither can see a file that is simply absent. `char_affect.cpp` is in 135 commits and
+    belongs to nothing, because four entries answer to the word "affect" and a contested
+    word identifies none of them — the territory rule is right to refuse, and the refusal
+    was silent. As a proposal it costs nothing: requiring EVERY distinctive word of the
+    name ("Item Affect System" needs item *and* affect) leaves one claimant per file here,
+    and cuts the queue from 2,657 loose matches to 173 worth looking at.
+    """
+    owned = {r[0] for r in conn.execute("SELECT DISTINCT path FROM domain_files")}
+    if repo:
+        alive = set(run_git(repo, ["ls-files"], check=False).splitlines())
+    else:                          # no worktree: every path history remembers, ghosts and all
+        alive = {r[0] for r in conn.execute("SELECT DISTINCT path FROM commit_files")}
+    free = [p for p in alive
+            if p not in owned and (scope is None or scope(p))
+            and (ledger is None or (ledger.owner(p) is None and not ledger.kept(p)))]
+    if not free:
+        return []
+
+    # by NAME, not by id: the catalogue holds two entries called "Quest System", and the
+    # ledger addresses entries by name — proposing the same file to each was half the queue
+    ents: dict[str, list] = {}
+    for r in conn.execute("SELECT id, name, tier FROM domains "
+                          "WHERE status IN ('named','confirmed','provisional')"):
+        if entry is None or r["name"] == entry:
+            ents.setdefault(r["name"], [r["tier"], []])[1].append(r["id"])
+    words = {name: _name_words(name) for name in ents}
+    hits: dict[str, list] = defaultdict(list)
+    claimed: dict[str, list] = defaultdict(list)
+    for p in free:
+        st = _stem_words(p)
+        for name in ents:
+            if all(w in st for w in words[name]):
+                hits[name].append(p)
+                claimed[p].append(name)
+    if not hits:
+        return []
+
+    # how many of the entry's OWN commits touched it — the second, weaker evidence, and
+    # the one that says whether this is a file it actually worked on
+    touched: Counter = Counter()
+    paths = {p for v in hits.values() for p in v}
+    ids = {did: name for name, (_, dids) in ents.items() for did in dids}
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _unclaimed (path TEXT PRIMARY KEY)")
+    conn.execute("DELETE FROM _unclaimed")
+    conn.executemany("INSERT INTO _unclaimed (path) VALUES (?)", [(p,) for p in paths])
+    for r in conn.execute(
+            "SELECT cd.domain_id d, cf.path p, COUNT(DISTINCT cf.commit_hash) n "
+            "FROM commit_domains cd JOIN commit_files cf ON cf.commit_hash = cd.commit_hash "
+            "JOIN _unclaimed u ON u.path = cf.path GROUP BY 1, 2"):
+        if r["d"] in ids:
+            touched[(ids[r["d"]], r["p"])] += r["n"]
+
+    out = []
+    for name, (tier, _) in ents.items():
+        fs = hits.get(name)
+        if not fs:
+            continue
+        files = sorted(({"path": p, "commits": touched.get((name, p), 0),
+                         "also": [o for o in claimed[p] if o != name]} for p in fs),
+                       key=lambda f: (-f["commits"], f["path"]))
+        out.append({"entry": name, "tier": tier, "n": len(files), "files": files,
+                    "worked_on": sum(1 for f in files if f["commits"])})
+    out.sort(key=lambda e: (-e["worked_on"], -e["n"]))
+    return out[:limit] if entry is None else out

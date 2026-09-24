@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ..scope import MD_FILE, Scope
 from ..taxonomy.ledger import PLAN_FILE, Ledger, LedgerError
+from .inspect import unclaimed
 
 _MIN_TREE_FILES = 6    # a directory smaller than this cannot be meaningfully fragmented
 
@@ -398,9 +399,9 @@ def _lint(led: Ledger, catalogue: dict, plan_text: str = "") -> list[str]:
 
 def _edges(conn) -> list[dict]:
     """uses-edges by NAME, so the graph survives a rebuild that renumbers domains."""
-    return [{"src": r["s"], "dst": r["d"], "w": r["weight"] or 0}
+    return [{"src": r["s"], "dst": r["d"], "w": r["weight"] or 0, "why": r["why"] or ""}
             for r in conn.execute(
-                "SELECT s.name s, d.name d, e.weight FROM domain_edges e "
+                "SELECT s.name s, d.name d, e.weight, e.why FROM domain_edges e "
                 "JOIN domains s ON s.id = e.src_domain "
                 "JOIN domains d ON d.id = e.dst_domain")]
 
@@ -475,7 +476,8 @@ def _timeline(conn) -> dict:
             "entries": ents}
 
 
-def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None = None) -> dict:
+def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None = None,
+                repo: str = "") -> dict:
     p = Path(plan_path)
     if plan_text is None:
         plan_text = p.read_text(encoding="utf-8") if p.exists() else Ledger().render()
@@ -490,9 +492,20 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
         "commits": conn.execute("SELECT COUNT(*) FROM commits WHERE is_merge=0").fetchone()[0],
         "chapters": conn.execute(
             "SELECT COUNT(*) FROM evolution_chapters").fetchone()[0],
+        # narration is the one paid stage, so what is still waiting for it is a standing
+        # list in the app rather than a line in a log nobody reads
+        "unnarrated": [
+            {"name": r["name"], "tier": r["tier"] or "feature", "commits": r["n_commits"] or 0,
+             "born": (r["born_at"] or "")[:10], "last": (r["last_seen"] or "")[:10]}
+            for r in conn.execute(
+                "SELECT name, tier, n_commits, born_at, last_seen FROM domains d "
+                "WHERE NOT EXISTS (SELECT 1 FROM evolution_chapters e "
+                "WHERE e.target_type='domain' AND e.target_id = CAST(d.id AS TEXT)) "
+                "ORDER BY n_commits DESC")],
         "trees": _fragmentation(conn, led),
         "vocab": _orphan_vocab(conn, led, Scope.load()),
         "relhints": _relation_hints(conn, led),
+        "unclaimed": unclaimed(conn, repo, scope=Scope.load(), ledger=led, limit=60),
         "plan": plan_text,
         "plan_path": str(p),
     }
@@ -511,15 +524,20 @@ class _Rebuild:
         self.proc = None
         self.lines: list[str] = []
         self.code: int | None = None
+        self.narrating = False
         self._lock = threading.Lock()
 
-    def start(self) -> bool:
+    def start(self, chronicle: bool = False) -> bool:
         with self._lock:
             if self.proc is not None and self.proc.poll() is None:
                 return False
             self.lines, self.code = [], None
+            self.narrating = chronicle
+            # narration is the only thing in the studio that spends money, so it is never
+            # implied by a save — it is a separate, named action
+            argv = [*self.argv, "--chronicle"] if chronicle else self.argv
             self.proc = subprocess.Popen(
-                self.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 env={**os.environ, "COLUMNS": "200", "NO_COLOR": "1"})
         threading.Thread(target=self._pump, daemon=True).start()
         return True
@@ -534,7 +552,7 @@ class _Rebuild:
         stage = next((ln.strip("▸ ").strip() for ln in reversed(self.lines)
                       if ln.startswith("▸")), "")
         return {"running": running, "code": self.code, "stage": stage,
-                "tail": self.lines[-14:]}
+                "narrating": self.narrating, "tail": self.lines[-14:]}
 
 
 def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: int = 8765,
@@ -589,7 +607,7 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 # the state rides along with the page, so the first paint needs no round trip
                 c = fresh()
                 try:
-                    st = build_state(c, plan)
+                    st = build_state(c, plan, repo=repo)
                 finally:
                     c.close()
                 st.update(project=title, can_ask=provider_factory is not None,
@@ -606,7 +624,7 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
             elif u.path == "/api/state":
                 c = fresh()
                 try:
-                    st = build_state(c, plan)
+                    st = build_state(c, plan, repo=repo)
                 finally:
                     c.close()
                 st["project"] = title
@@ -630,12 +648,22 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                     sc = Scope.load()
                     qq = (q.get("q") or [""])[0]
                     if (q.get("file") or [""])[0]:
-                        self._json(file_card(c, q["file"][0], repo))
+                        led = Ledger.load(plan) if plan.exists() else None
+                        self._json(file_card(c, q["file"][0], repo, ledger=led))
                     else:
                         out = find(c, qq, scope=sc)
                         out["hint"] = (split_hint(c, repo, qq, scope=sc)
                                        if repo and 1 < len(out["files"]) <= 80 else None)
                         self._json(out)
+                finally:
+                    c.close()
+            elif u.path == "/api/why":
+                from ..taxonomy.relations import edge_evidence
+                c = fresh()
+                try:
+                    self._json({"refs": edge_evidence(
+                        c, repo, (q.get("src") or [""])[0], (q.get("dst") or [""])[0])
+                        if repo else []})
                 finally:
                     c.close()
             elif u.path == "/api/search":
@@ -689,7 +717,8 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 if rebuild is None:
                     self._json({"error": "rebuild not available"}, 400)
                 else:
-                    self._json({"started": rebuild.start(), **rebuild.status()})
+                    started = rebuild.start(chronicle=bool(body.get("chronicle")))
+                    self._json({"started": started, **rebuild.status()})
             else:
                 self._send(b"not found", "text/plain", 404)
 

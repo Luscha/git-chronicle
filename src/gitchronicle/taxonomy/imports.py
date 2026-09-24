@@ -17,26 +17,45 @@ from collections import Counter
 from ..extract.git_ingest import run_git
 
 _PATTERNS = [
-    re.compile(r'#\s*include\s*[<"]([^">]+)[">]'),                   # C/C++/ObjC
-    re.compile(r'^\s*from\s+([\w.]+)\s+import\b', re.M),              # Python
-    re.compile(r'^\s*import\s+([\w.,\s]+)', re.M),                    # Python / Java
-    re.compile(r'\brequire\s*\(?\s*[\'"]([^\'"]+)[\'"]'),             # Lua / JS
-    re.compile(r'^\s*import\s+.*?from\s+[\'"]([^\'"]+)[\'"]', re.M),  # ES modules
+    ("c",   re.compile(r'#\s*include\s*[<"]([^">]+)[">]')),                  # C/C++/ObjC
+    ("py",  re.compile(r'^\s*from\s+([\w.]+)\s+import\b', re.M)),            # Python
+    ("py",  re.compile(r'^\s*import\s+([\w.,\s]+)', re.M)),                   # Python / Java
+    ("req", re.compile(r'\brequire\s*\(?\s*[\'"]([^\'"]+)[\'"]')),            # Lua / JS
+    ("es",  re.compile(r'^\s*import\s+.*?from\s+[\'"]([^\'"]+)[\'"]', re.M)),  # ES modules
+    ("rs",  re.compile(r'^\s*(?:pub\s+)?use\s+([\w:]+)', re.M)),                # Rust
+    ("rs",  re.compile(r'^\s*(?:pub\s+)?mod\s+(\w+)\s*;', re.M)),               # Rust
 ]
 
+# Rust names a module by path, not by file: `use alacritty_terminal::term::Term` points
+# at term.rs, and the trailing segment is the TYPE. Module segments are snake_case and
+# types are CamelCase, which is the language's own convention and enough to tell them
+# apart without parsing.
+_RUST_SEG = re.compile(r"[a-z_][a-z0-9_]*$")
 
-def extract_import_refs(text: str) -> set[str]:
-    """Basenames (no extension, lowercased) this file references via import/include."""
-    refs: set[str] = set()
-    for pat in _PATTERNS:
+
+def extract_import_refs(text: str, with_kind: bool = False):
+    """Basenames (no extension, lowercased) this file references via import/include.
+
+    With `with_kind`, each reference comes back as (basename, syntax) — which of the five
+    forms found it. The syntax is what makes a reference resolvable: `#include "config.h"`
+    cannot possibly mean a TypeScript file, and matching by basename alone said it did.
+    """
+    refs: set = set()
+    for kind, pat in _PATTERNS:
         for m in pat.finditer(text):
             for tok in re.split(r"[,\s]+", m.group(1).strip()):
                 if not tok:
                     continue
-                base = tok.replace("\\", "/").rsplit("/", 1)[-1]
-                base = base.rsplit(".", 1)[0]
+                if kind == "rs":
+                    segs = [x for x in tok.split("::") if _RUST_SEG.match(x)]
+                    # `use crate::grid::Grid` -> grid; `use self::event` -> event
+                    segs = [x for x in segs if x not in ("crate", "self", "super", "std")]
+                    base = segs[-1] if segs else ""
+                else:
+                    base = tok.replace("\\", "/").rsplit("/", 1)[-1]
+                    base = base.rsplit(".", 1)[0]
                 if base:
-                    refs.add(base.lower())
+                    refs.add((base.lower(), kind) if with_kind else base.lower())
     return refs
 
 

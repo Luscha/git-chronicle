@@ -188,3 +188,92 @@ def test_inspect_tells_a_file_what_it_was_built_for(kb):
     assert card["concerns"][0]["label"] == "Battle pass UI"
     assert card["chapters"] and card["chapters"][0]["title"] == "Built then removed"
     assert card["cochanged"][0]["path"] == "src/battlepass/quest.py"
+
+
+def test_unclaimed_proposes_the_files_that_carry_an_entry_s_name(kb):
+    """The catalogue named the thing and held none of its code: four entries answered to
+    the word "affect", a contested word identifies none of them, and char_affect.cpp (135
+    commits) belonged to nobody without a single line saying so."""
+    from gitchronicle.serve.inspect import unclaimed
+    from gitchronicle.taxonomy.ledger import Ledger
+    c = connect(kb)
+    c.execute("INSERT INTO domains (id, name, tier, classification, status, created_by) "
+              "VALUES (2,'Affect System','feature','feature','named','lineage')")
+    c.execute("INSERT INTO domains (id, name, tier, classification, status, created_by) "
+              "VALUES (3,'Item Affect System','feature','feature','named','lineage')")
+    c.execute("INSERT INTO commit_domains (commit_hash, domain_id, weight) "
+              "VALUES ('abc123def4',2,1.0)")
+    for p in ("src/char_affect.cpp", "src/affect.h", "src/unrelated.cpp"):
+        c.execute("INSERT INTO commit_files (commit_hash, path) VALUES ('abc123def4',?)", (p,))
+    c.commit()
+    rows = {r["entry"]: r for r in unclaimed(c)}
+    assert sorted(f["path"] for f in rows["Affect System"]["files"]) == \
+        ["src/affect.h", "src/char_affect.cpp"]
+    # EVERY word of the name must be there, or "affect" alone hands the same file to four
+    # entries and the queue is half duplicates
+    assert "Item Affect System" not in rows
+    # the entry's own commits are the second, weaker evidence
+    assert rows["Affect System"]["files"][0]["commits"] == 1
+    # a file the owner has judged to stand on its own stops being proposed
+    led = Ledger.parse("keep-split src/affect.h\n")
+    left = unclaimed(c, ledger=led, entry="Affect System")[0]["files"]
+    assert [f["path"] for f in left] == ["src/char_affect.cpp"]
+
+
+def test_unclaimed_leaves_owned_files_alone(kb):
+    from gitchronicle.serve.inspect import unclaimed
+    c = connect(kb)
+    c.execute("INSERT INTO commit_files (commit_hash, path) VALUES "
+              "('abc123def4','src/battlepass/ui.py')")
+    c.commit()
+    assert not unclaimed(c, entry="Battlepass System")
+
+
+def test_a_file_says_why_its_entry_holds_it(kb):
+    """Territory comes from a rule, from the work attached to the file, or from its own
+    name, and all three read identically in the catalogue."""
+    from gitchronicle.serve.inspect import file_card
+    from gitchronicle.taxonomy.ledger import Ledger
+    c = connect(kb)
+    c.execute("INSERT INTO concerns (commit_hash, label, files, domain_id) VALUES "
+              "('abc123def4','Battle pass UI','[\"src/battlepass/ui.py\"]',1)")
+    c.commit()
+    why = file_card(c, "src/battlepass/ui.py")["why"]
+    assert any("work item" in w for w in why)
+    # the name evidence reads the FILENAME, which is where a claim of identity lives
+    c.execute("INSERT INTO domain_files (domain_id, path, weight, source) "
+              "VALUES (1,'src/ui/battlepass_panel.py',1.0,'register')")
+    c.commit()
+    assert any("name carries" in w for w in file_card(c, "src/ui/battlepass_panel.py")["why"])
+    led = Ledger.parse('entry "Battlepass System"\n  claim src/battlepass/**\n')
+    why = file_card(c, "src/battlepass/ui.py", ledger=led)["why"]
+    assert why[0].startswith("a rule in your plan claims it")
+
+
+def test_the_state_counts_what_has_no_story_yet(kb, tmp_path):
+    from gitchronicle.serve.studio import build_state
+    c = connect(kb)
+    c.execute("INSERT INTO domains (id, name, classification, status, created_by) "
+              "VALUES (7,'Telemetry','feature','named','lineage')")
+    c.commit()
+    st = build_state(c, tmp_path / "gitchronicle.plan")
+    # Battlepass has a chapter, Telemetry none — and the studio lists WHICH, because a
+    # number alone cannot be acted on
+    assert [e["name"] for e in st["unnarrated"]] == ["Telemetry"]
+
+
+def test_the_mcp_inspect_tool_explains_a_link(kb, tmp_path, monkeypatch):
+    """An agent that cannot see what an edge rests on cannot weigh it — and 85 of this
+    repository's 227 edges turned out to rest on a filename collision."""
+    from gitchronicle.serve.mcp import KB
+    monkeypatch.chdir(tmp_path)
+    c = connect(kb)
+    c.execute("INSERT INTO domains (id, name, tier, classification, status, created_by) "
+              "VALUES (2,'Renderer','framework','feature','named','lineage')")
+    c.execute("INSERT INTO domain_edges (src_domain, dst_domain, type, weight, why, status) "
+              "VALUES (1,2,'uses',3.0,\"3 files in 'Battlepass System' import 'Renderer' "
+              "territory\",'named')")
+    c.commit()
+    out = KB(str(kb)).inspect("Battlepass System -> Renderer")
+    assert "Battlepass System -> Renderer" in out and "3 files" in out
+    assert "No link" in KB(str(kb)).inspect("Renderer -> Battlepass System")

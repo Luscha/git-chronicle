@@ -128,8 +128,22 @@ inside one component.
 `uses` edges come from static imports over register territory, including
 embedded-interpreter registrations (`import luna` resolves to the C++ bridge that
 registers it) — deterministic, no LLM. High fan-in marks framework hubs.
+
+A reference resolves by basename, so **the syntax that produced it decides what it may
+name**: `#include "config.h"` cannot mean `config.js`, and the target must still exist at
+HEAD. The rule is an exclusion, not a whitelist — an unknown extension (`.fx` including
+`.fxh`, `.forge` requiring a `.lua` library) resolves as before, and a Python import may
+still reach a native extension module. It removed 85 of 227 edges on the reference
+repository, two of whose six biggest hubs were collisions.
+
+Edges are evidence, not fact, so both directions are open to the owner: `uses "…"` states a
+relation no import can show, `not-uses "A" -> "B"` deletes one the imports assert, and the
+studio shows the references behind every link before you decide.
 `chronicle` (opt-in) narrates each feature's evolution as commit-anchored
-chapters. Chapters follow **arcs**, not the calendar: a break means the work genuinely
+chapters. Each chapter's evidence is this domain's own dated work items — never the raw
+subjects of multi-feature commits — plus two facts about the chapter's edge: how long the
+work stopped afterwards, and which of the domain's own files no longer exist. Without them
+a feature's death reads as a shipment; with them it is told and dated (`docs/measurements.md`). Chapters follow **arcs**, not the calendar: a break means the work genuinely
 stopped for months, and a long run of upkeep is one "kept it running" chapter rather than
 one per month. Building versus maintaining is read from whether the entry gained code, not
 from what the commit message called it. Battle Pass went from 14 chapters to 4; the corpus

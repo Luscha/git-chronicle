@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from ..extract.git_ingest import BatchReader
+from ..extract.git_ingest import BatchReader, run_git
 from .imports import extract_import_refs
 
 # embedded-interpreter module registration: the C/C++ side coins the importable name
@@ -29,14 +29,35 @@ _HUB_MIN_FANIN = 5             # used by >=5 other features => framework hub
 _SWEEP_FILES = 150             # a commit touching more files than this is a sweep, not
                                # development of any one of them
 
+# A reference can only mean a file its own syntax could be naming. `#include "config.h"`
+# in char_affect.cpp was resolving to ccc/frontend/public/config.js, and 85 of this
+# repository's 227 import edges were that same collision. Stated as an EXCLUSION rather
+# than a whitelist: an unknown extension (.fx, .forge, .inc) resolves as it always did,
+# and a Python import may still reach a native extension module.
+_WEB = {"js", "mjs", "cjs", "ts", "tsx", "jsx", "vue", "svelte"}
+_PY = {"py", "pyw", "pyx"}
+_NATIVE = {"c", "cc", "cpp", "cxx", "c++", "h", "hh", "hpp", "hxx", "h++", "inl", "ipp",
+           "m", "mm"}
+_CANNOT_NAME = {"c": _WEB | _PY | {"lua"}, "py": _WEB | {"lua"},
+                "req": _PY, "es": _NATIVE | _PY | {"lua"},
+                "rs": _WEB | _PY | _NATIVE | {"lua"}}
 
-def build_relations(conn, repo: str, log=print, ledger=None,
-                    max_files: int = _MAX_FILES_PER_FEATURE) -> dict:
+
+def _ext(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def _index(conn, repo: str, max_files: int) -> dict:
+    """Who owns which file, and which files a reference could be naming.
+
+    Shared by the edge builder and by the evidence behind one edge, so what the studio
+    shows as the reason for a link is the same resolution that created it.
+    """
     feats = {r["id"]: r["name"] for r in conn.execute(
         "SELECT id, name FROM domains WHERE status IN ('named','confirmed','provisional')")}
     if not feats:
-        log("  no register — run `gitchronicle register` first")
-        return {"edges": 0}
+        return {"feats": feats}
 
     # file -> owning feature: register territory (worktree truth) beats history-derived
     # weight; files claimed by many features are ambiguous glue and own nothing
@@ -71,8 +92,13 @@ def build_relations(conn, repo: str, log=print, ledger=None,
             owner[path] = reg[0][2]
         elif not reg and len(cs) <= 3:
             owner[path] = max(cs)[2]
-    by_base: dict[str, list[int]] = defaultdict(list)
+    # a target that no longer exists cannot be what today's code includes: a deleted
+    # sys.* absorbed 67 `import sys` lines and spread edges across the whole catalogue
+    alive = set(run_git(repo, ["ls-files"], check=False).splitlines()) if repo else None
+    by_base: dict[str, list[tuple]] = defaultdict(list)
     for path, did in owner.items():
+        if alive is not None and path not in alive:
+            continue
         # An import target nobody here wrote is not a dependency on anyone's feature. A tool
         # that vendors a language's standard library otherwise looks like the thing every
         # script in the repository is built on — 17 such edges here, and 13 of them made it
@@ -92,13 +118,31 @@ def build_relations(conn, repo: str, log=print, ledger=None,
                 and fname.rsplit(".", 1)[-1]
                 in ("py", "pyw", "js", "mjs", "cjs", "ts", "jsx", "tsx", "rs", "go")):
             base = parts[-2].lower()
-        by_base[base].append(did)
+        by_base[base].append((did, path))
 
-    # read each feature's top territory files once; collect cross-feature references
+    # read each feature's top territory files once
     per_feat_files: dict[int, list[str]] = defaultdict(list)
     for path, did in owner.items():
         if len(per_feat_files[did]) < max_files:
             per_feat_files[did].append(path)
+    return {"feats": feats, "owner": owner, "by_base": by_base, "files": per_feat_files}
+
+
+def _resolve(ref: str, kind: str, by_base: dict) -> list[tuple]:
+    """The (entry, file) pairs a reference could be naming, its own syntax respected."""
+    return [(d, p) for d, p in by_base.get(ref, ())
+            if _ext(p) not in _CANNOT_NAME.get(kind, ())]
+
+
+def build_relations(conn, repo: str, log=print, ledger=None,
+                    max_files: int = _MAX_FILES_PER_FEATURE) -> dict:
+    idx = _index(conn, repo, max_files)
+    feats = idx["feats"]
+    if not feats:
+        log("  no register — run `gitchronicle register` first")
+        return {"edges": 0}
+    by_base, per_feat_files = idx["by_base"], idx["files"]
+
     reader = BatchReader(repo)
     texts: dict[str, str] = {}
     embed_owner: dict[str, int | None] = {}
@@ -123,7 +167,7 @@ def build_relations(conn, repo: str, log=print, ledger=None,
             text = texts.get(f)
             if not text:
                 continue
-            for ref in extract_import_refs(text):
+            for ref, kind in extract_import_refs(text, with_kind=True):
                 if ref in embed_owner:
                     target = embed_owner[ref]     # None = ambiguous registration
                     strong = True                 # coined module name: one import suffices
@@ -131,7 +175,7 @@ def build_relations(conn, repo: str, log=print, ledger=None,
                     # DISTINCT owners: char_traits.hpp and char_traits.cpp are two files
                     # and one entry, and counting files made every C/C++ header/source pair
                     # look ambiguous — 499 import targets in this repository alone
-                    owners = set(by_base.get(ref, []))
+                    owners = {d for d, _ in _resolve(ref, kind, by_base)}
                     target = next(iter(owners)) if len(owners) == 1 else None
                     strong = False
                 if target is not None and target != did:
@@ -139,12 +183,23 @@ def build_relations(conn, repo: str, log=print, ledger=None,
                     if strong:
                         strong_edges.add((did, target))
 
+    # Relations the owner has judged and rejected. `not-uses` used to stop the studio
+    # PROPOSING a link and did nothing to one already inferred, so a wrong edge could be
+    # dismissed and still stand in the graph — the one verdict the ledger could not carry.
+    ids = {name: did for did, name in feats.items()}
+    refused = {(ids[a], ids[b]) for a, b in
+               (ledger.rejected_relations() if ledger is not None else [])
+               if a in ids and b in ids}
+
     conn.execute("DELETE FROM domain_edges WHERE status != 'confirmed' AND locked = 0")
-    n = 0
+    n = vetoed = 0
     used_by: Counter = Counter()
     inferred: set = set()
     for (a, b), files in edge_files.items():
         if len(files) < _MIN_EDGE_FILES and (a, b) not in strong_edges:
+            continue
+        if (a, b) in refused:
+            vetoed += 1
             continue
         conn.execute(
             "INSERT INTO domain_edges (src_domain, dst_domain, type, weight, why, status) "
@@ -160,9 +215,12 @@ def build_relations(conn, repo: str, log=print, ledger=None,
     # the statement IS the evidence and it outranks anything inferred.
     stated = 0
     if ledger is not None:
-        ids = {name: did for did, name in feats.items()}
         for src, dst in ledger.relations():
             a, b = ids.get(src), ids.get(dst)
+            if a is not None and (a, b) in refused:
+                log(f"    '{src}' uses '{dst}' and not-uses it too — the refusal wins; "
+                    f"delete one of the two lines")
+                continue
             if a is None or b is None:
                 log(f"    '{src}' uses '{dst}': " +
                     ("no entry called " + ("'" + src + "'" if a is None else "'" + dst + "'")))
@@ -189,6 +247,38 @@ def build_relations(conn, repo: str, log=print, ledger=None,
             conn.execute("UPDATE domains SET fan_in=? WHERE id=?", (cnt, did))
             hubs.append((feats[did], cnt))
     conn.commit()
-    log(f"  {n} uses-edges ({stated} stated, the rest from imports); hubs: " + (", ".join(f"{h} (used by {c})" for h, c in hubs[:6])
+    log(f"  {n} uses-edges ({stated} stated, {vetoed} refused by the plan, "
+        f"the rest from imports); hubs: " + (", ".join(f"{h} (used by {c})" for h, c in hubs[:6])
                                        or "none"))
     return {"edges": n, "hubs": hubs[:10]}
+
+
+def edge_evidence(conn, repo: str, src: str, dst: str, limit: int = 40,
+                  max_files: int = _MAX_FILES_PER_FEATURE) -> list[dict]:
+    """The references that put an edge there: which file names which file.
+
+    A link the owner cannot interrogate is a link the owner cannot judge — and one of the
+    first ones looked at was wrong.
+    """
+    idx = _index(conn, repo, max_files)
+    ids = {n: d for d, n in idx.get("feats", {}).items()}
+    if src not in ids or dst not in ids:
+        return []
+    a, b = ids[src], ids[dst]
+    out, reader = [], BatchReader(repo)
+    try:
+        for f in idx["files"].get(a, []):
+            text = reader.read("HEAD", f, limit=60000)
+            if not text:
+                continue
+            for ref, kind in extract_import_refs(text, with_kind=True):
+                hits = _resolve(ref, kind, idx["by_base"])
+                if {d for d, _ in hits} != {b}:
+                    continue
+                for _, p in hits[:2]:
+                    out.append({"file": f, "ref": ref, "target": p})
+                if len(out) >= limit:
+                    return out
+    finally:
+        reader.close()
+    return out

@@ -63,7 +63,7 @@ _HEADER = """\
 #   reject     "<name>"     tombstone: never proposed again
 #   keep-split <glob>       this directory is MEANT to span several entries — stop asking
 #   ignore     <word>       this word runs through the work but names nothing — stop asking
-#   not-uses   "<a>" -> "<b>"   they are merely mentioned together — stop proposing it
+#   not-uses   "<a>" -> "<b>"   not a relation: removes the link and stops proposing it
 """
 
 
@@ -287,6 +287,16 @@ class Ledger:
                 if src != dst:
                     out.append((src, dst))
         return out
+
+    def rejected_relations(self) -> list[tuple[str, str]]:
+        """(source, target) pairs the owner judged NOT to be a relation.
+
+        Imports are evidence, not proof: a file may include another for one constant. The
+        verdict has to be able to say no, or an edge the owner has judged wrong is one
+        nothing in the tool can remove.
+        """
+        merged = dict(self.merges)
+        return [(merged.get(a, a), merged.get(b, b)) for a, b in self.not_uses]
 
     def tiers(self) -> dict[str, str]:
         return self._through_merges({e.name: e.tier for e in self.entries if e.tier})
