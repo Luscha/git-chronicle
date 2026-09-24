@@ -191,6 +191,22 @@ class Scope:
             return False
         return True
 
+    def shadowed(self) -> list[tuple[str, str]]:
+        """Excludes an include already overrides — they read as filters and do nothing.
+
+        An explicit include wins by design, so it can carve a pocket of code back out of
+        an excluded tree; the cost is that a narrower exclude written under a broader
+        include is silently inert, which is a trap worth reporting.
+        """
+        out = []
+        for e in self.excludes + self.acknowledges:
+            probe = e.replace("**", "x").replace("*", "x")
+            for i in self.includes:
+                if i != "**" and fnmatch.fnmatch(probe, i):
+                    out.append((e, i))
+                    break
+        return out
+
     def exists(self) -> bool:
         return bool(self.excludes) or self.includes != ["**"]
 
@@ -268,6 +284,22 @@ class Direction:
             else:
                 rules.append(rest)
         return cls(voice, audience, gloss, rules)
+
+    def shadowed(self) -> list[tuple[str, str]]:
+        """Excludes an include already overrides — they read as filters and do nothing.
+
+        An explicit include wins by design, so it can carve a pocket of code back out of
+        an excluded tree; the cost is that a narrower exclude written under a broader
+        include is silently inert, which is a trap worth reporting.
+        """
+        out = []
+        for e in self.excludes + self.acknowledges:
+            probe = e.replace("**", "x").replace("*", "x")
+            for i in self.includes:
+                if i != "**" and fnmatch.fnmatch(probe, i):
+                    out.append((e, i))
+                    break
+        return out
 
     def exists(self) -> bool:
         return bool(self.voice or self.audience or self.glossary or self.rules)
