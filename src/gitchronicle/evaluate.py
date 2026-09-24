@@ -69,7 +69,7 @@ def run_eval(questions_path: str, kb_path: str, provider, log=print, samples: in
                     + ("UNANSWERABLE: yes\n" if q.get("unanswerable") else "")
                     + "KNOWN FACTS:\n" + "\n".join(f"- {f}" for f in facts)
                     + f"\n\nANSWER:\n{r['answer']}")
-            v = provider.chat(_JUDGE, user, want_json=True, role="chat_large")
+            v = provider.chat(_JUDGE, user, want_json=True, role="judge", stage="eval")
             v = v if isinstance(v, dict) else {}
             verdicts = [f for f in v.get("facts") or [] if isinstance(f, dict)]
             stated = sum(f.get("verdict") == "stated" for f in verdicts)

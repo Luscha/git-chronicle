@@ -211,7 +211,8 @@ def _repo_chronicle(conn, provider, log, force):
                 f"Sample commits:\n{sample}\n\nReturn "
                 '{"title":"...","narrative":"2-4 sentences"}')
         try:
-            r = provider.chat(REPO_SYS, user, want_json=True, large=True, cache_extra=f"repo:{k}:{len(cs)}")
+            r = provider.chat(REPO_SYS, user, want_json=True, large=True,
+                              cache_extra=f"repo:{k}:{len(cs)}", stage="narration")
         except NotCached:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -292,7 +293,8 @@ def _prefetch(conn, provider, repo, doms, workers, log) -> None:
     def run(job):
         user, key = job
         try:
-            provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
+            provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key,
+                          role="narration", stage="narration")
         except Exception:      # a failure here is retried by the sequential pass
             pass
         done[0] += 1
@@ -373,7 +375,8 @@ def _narrate(conn, provider, repo, doms, force, log) -> tuple[int, list[str]]:
                     continue
                 user, key = _chapter_prompt(conn, repo, did, d["name"], ch, concerns)
                 try:
-                    r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key)
+                    r = provider.chat(CHAP_SYS, user, want_json=True, cache_extra=key,
+                                      role="narration", stage="narration")
                 except NotCached:
                     raise
                 except Exception as exc:  # noqa: BLE001
@@ -403,7 +406,8 @@ def _narrate(conn, provider, repo, doms, force, log) -> tuple[int, list[str]]:
             try:
                 r = provider.chat(DISTILL_SYS, f"Domain: {d['name']}\nEvolution:\n{story}\n\n"
                                   'Return {"summary":"..."}', want_json=True,
-                                  cache_extra=f"distill:{d['name']}:{len(narratives)}")
+                                  cache_extra=f"distill:{d['name']}:{len(narratives)}",
+                                  role="narration", stage="distil")
                 summary = ((r.get("summary") if isinstance(r, dict) else "") or "").strip()
                 if summary:
                     conn.execute("UPDATE domains SET summary=? WHERE id=? AND status!='confirmed' "

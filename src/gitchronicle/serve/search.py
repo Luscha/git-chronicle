@@ -244,6 +244,6 @@ def ask(index: Index, kb_path: str, provider, question: str, sample: str = "") -
             + ("\n\n".join(blocks) or "(none matched)")
             + "\n\nEVIDENCE — COMMITS:\n" + (commits or "(none matched)"))
     answer = provider.chat(_ASK_SYS, user, want_json=False, role="chat_large",
-                           cache_extra=sample)
+                           cache_extra=sample, stage="ask")
     return {"answer": answer if isinstance(answer, str) else json.dumps(answer),
             "used": names, "hits": hits}

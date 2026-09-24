@@ -7,7 +7,7 @@
 <style>
 :root {
   --t-foundation:#2a78d6; --t-framework:#eb6834; --t-feature:#1baf7a;
-  --t-tooling:#eda100;    --t-content:#e87ba4; --t-inherited:#a3a7b0;
+  --t-tooling:#eda100;    --t-content:#e87ba4; --t-inherited:#a3a7b0; --t-upkeep:#b9a389;
   --bg:#f6f6f7; --panel:#ffffff; --panel-2:#fafafb; --sunken:#f1f1f3;
   --fg:#16171b; --fg-2:#3b3e46; --muted:#6c707b; --faint:#9da1ab;
   --line:#e6e6ea; --line-2:#eeeef1;
@@ -25,7 +25,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --t-foundation:#4b93ea; --t-framework:#e8723f; --t-feature:#27b583;
-    --t-tooling:#d99a12;    --t-content:#df6b95; --t-inherited:#6b6f78;
+    --t-tooling:#d99a12;    --t-content:#df6b95; --t-inherited:#6b6f78; --t-upkeep:#7d6f5c;
     --bg:#0d0e11; --panel:#15161a; --panel-2:#18191e; --sunken:#1c1d22;
     --fg:#ededf0; --fg-2:#c7c9cf; --muted:#8e929c; --faint:#62666f;
     --line:#26282e; --line-2:#1f2126;
@@ -357,8 +357,8 @@ window.addEventListener("error", e => showErr(e.message + (e.lineno ? " (line " 
 window.addEventListener("unhandledrejection", e => showErr(String(e.reason && e.reason.message || e.reason)));
 function showErr(msg) { const b = document.getElementById("err"); b.textContent = "Something broke: " + msg; b.style.display = "block"; }
 
-const TIERS = ["foundation", "framework", "feature", "tooling", "content", "inherited"];
-const TIER_LABEL = { foundation: "Foundation", framework: "Framework", feature: "Feature", tooling: "Tooling", content: "Content", inherited: "Inherited" };
+const TIERS = ["foundation", "framework", "feature", "tooling", "content", "inherited", "upkeep"];
+const TIER_LABEL = { foundation: "Foundation", framework: "Framework", feature: "Feature", tooling: "Tooling", content: "Content", inherited: "Inherited", upkeep: "Upkeep" };
 const TIER_HELP = {
   foundation: "Everything stands on it: used across the codebase for years.",
   framework: "A system other features are built with.",
@@ -366,8 +366,9 @@ const TIER_HELP = {
   tooling: "Built to make the project, not part of it.",
   content: "Data and scripts: quests, maps, events.",
   inherited: "Upkeep of code that predates the project — not something built here.",
+  upkeep: "Work that belongs to no single feature: fixes, chores and one-off changes.",
 };
-const SETTABLE = TIERS.filter(t => t !== "inherited");
+const SETTABLE = TIERS.filter(t => t !== "inherited" && t !== "upkeep");
 let S = null;                     // the state served by /api/state
 let planText = "", savedPlan = "", dirty = 0;
 let byName = new Map(), uses = new Map(), usedBy = new Map();
@@ -1041,7 +1042,7 @@ function renderTimeline(main) {
       && tl.entries[r.name] && tl.entries[r.name].act.length);
     rows.sort(tlSort === "commits" ? (a, b) => b.commits - a.commits
       : tlSort === "last" ? (a, b) => (b.last || "").localeCompare(a.last || "")
-      : (a, b) => (a.tier === "inherited") - (b.tier === "inherited") || (a.born || "").localeCompare(b.born || "") || a.name.localeCompare(b.name));
+      : (a, b) => (a.tier === "inherited" || a.tier === "upkeep") - (b.tier === "inherited" || b.tier === "upkeep") || (a.born || "").localeCompare(b.born || "") || a.name.localeCompare(b.name));
     const RH = 20, top = 26;
     const svg = s("svg", { viewBox: `0 0 ${W} ${top + rows.length * RH + 6}` });
     const cellMax = 24;
@@ -1080,7 +1081,7 @@ function yearPanel(year, monthIdx) {
   const a = monthIdx(year + "-01"), b = monthIdx(year + "-12");
   const act = [];
   for (const r of S.catalogue) {
-    const e = tl.entries[r.name]; if (!e || r.tier === "inherited") continue;
+    const e = tl.entries[r.name]; if (!e || r.tier === "inherited" || r.tier === "upkeep") continue;
     const n = e.act.reduce((t, [m, k]) => t + (m >= a && m <= b ? k : 0), 0);
     if (n) act.push({ r, n, arcs: e.arcs.filter(x => x[1] >= a && x[0] <= b) });
   }

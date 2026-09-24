@@ -144,7 +144,7 @@ function renderList() {
   for (const r of DATA) {
     if (q && !(r.name.toLowerCase().includes(q) || r.definition.toLowerCase().includes(q)))
       continue;
-    if (r.classification === "vendored" || r.classification === "inherited")
+    if (r.classification === "vendored" || r.classification === "inherited" || r.classification === "upkeep")
       { vul.append(itemLi(r, cur)); nv++; continue; }
     (groups.get(r.tier) || groups.get("feature")).push(r);
   }
@@ -228,7 +228,7 @@ function renderJourney() {
   m.append(el("h2", "", "Feature journey"));
   m.append(el("p", "sum", "Features by first attributed commit; ⭐ = framework hub."));
   const dated = DATA.filter(r => r.commits.length && r.classification !== "vendored"
-    && r.classification !== "inherited")
+    && r.classification !== "inherited" && r.classification !== "upkeep")
     .map(r => [r.commits[0].date, r]).sort((a, b) => a[0] < b[0] ? -1 : 1);
   let year = "";
   for (const [d, r] of dated) {

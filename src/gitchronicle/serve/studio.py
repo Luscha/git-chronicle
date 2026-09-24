@@ -62,7 +62,8 @@ def _catalogue(conn) -> list[dict]:
             # inherited upkeep is not a thing anyone built; it gets its own tier rather
             # than posing as content
             "name": r["name"],
-            "tier": "inherited" if r["classification"] == "inherited" else r["tier"] or "feature",
+            "tier": (r["classification"] if r["classification"] in ("inherited", "upkeep")
+                     else r["tier"] or "feature"),
             "tier_from": r["tier_from"] or "auto",
             # an entry only the rules create is renamed by editing them; one the pipeline
             # proposes is renamed by a merge, because its name comes back every rebuild

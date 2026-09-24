@@ -169,7 +169,7 @@ class KB:
                 "SELECT d.name, d.tier, COUNT(DISTINCT c.hash) n FROM commit_domains cd "
                 "JOIN commits c ON c.hash=cd.commit_hash JOIN domains d ON d.id=cd.domain_id "
                 "WHERE c.authored_at >= ? AND c.authored_at <= ? AND c.is_merge=0 "
-                "AND d.classification != 'inherited' GROUP BY d.id ORDER BY n DESC LIMIT 12",
+                "AND d.classification NOT IN ('inherited','upkeep') GROUP BY d.id ORDER BY n DESC LIMIT 12",
                 (a, b + "T99")).fetchall()
             born = c.execute("SELECT name, definition FROM domains WHERE born_at >= ? AND "
                              "born_at <= ? ORDER BY n_commits DESC LIMIT 12", (a, b)).fetchall()

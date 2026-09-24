@@ -111,7 +111,7 @@ def _auto(row, fanin: int, fan_comps: int, tree_comps: int, files: set) -> str:
     cls = row["classification"] or ""
     if cls == "content":
         return "content"
-    if cls == "inherited":
+    if cls in ("inherited", "upkeep"):
         return "content"
     if files and all(p.split("/", 1)[0].lower() in _TOOL_ROOTS for p in files):
         return "tooling"
