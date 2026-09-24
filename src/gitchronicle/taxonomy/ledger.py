@@ -57,11 +57,13 @@ _HEADER = """\
 #     reject <glob>           ... except these; on a proposed entry, gives them back
 #     tier   <t>              foundation | framework | feature | content | tooling
 #     note   <text>           your own words, carried into the knowledge base
+#     uses   "<other>"        it is built on that entry — a relation no import can show
 #     lock                    auto-runs may never rename or re-tier it
 #   merge      "<from>" -> "<to>"
 #   reject     "<name>"     tombstone: never proposed again
 #   keep-split <glob>       this directory is MEANT to span several entries — stop asking
 #   ignore     <word>       this word runs through the work but names nothing — stop asking
+#   not-uses   "<a>" -> "<b>"   they are merely mentioned together — stop proposing it
 """
 
 
@@ -79,6 +81,10 @@ class Entry:
         # into another must not also sweep up the rest of the repo under the same folder.
         self.takes: list[tuple[str, str]] = []
         self.rejects: list[str] = []
+        # Relations the owner states outright. Imports only ever show code calling code:
+        # a quest file rendered by uchtml, or content driven by the forge, references
+        # nothing an extractor can read, and that relation exists only here.
+        self.uses: list[str] = []
         self.tier: str | None = None
         self.note: str | None = None
         self.locked = False
@@ -98,7 +104,7 @@ class Ledger:
     """Parsed curation. ``entries`` keeps file order, which is also precedence order."""
 
     def __init__(self, entries=None, merges=None, tombstones=None, keep_splits=None,
-                 ignored=None):
+                 ignored=None, not_uses=None):
         self.entries: list[Entry] = entries or []
         self.merges: list[tuple[str, str]] = merges or []
         self.tombstones: list[str] = tombstones or []
@@ -109,6 +115,8 @@ class Ledger:
         # equivalent of keep-split, and just as necessary: without it the same question
         # comes back on every run
         self.ignored: list[str] = ignored or []
+        # a rejected relation, so the queue stops proposing what has been judged
+        self.not_uses: list[tuple[str, str]] = not_uses or []
 
     # -- parsing ----------------------------------------------------------
     @classmethod
@@ -125,6 +133,7 @@ class Ledger:
         tombs: list[str] = []
         keeps: list[str] = []
         ignored: list[str] = []
+        nots: list[tuple[str, str]] = []
         by_name: dict[str, Entry] = {}
         cur: Entry | None = None
 
@@ -152,6 +161,12 @@ class Ledger:
             elif verb == "keep-split":
                 keeps.append(rest)
                 cur = None
+            elif verb == "not-uses":
+                src, _, dst = rest.partition("->")
+                if not dst.strip():
+                    raise LedgerError(f"line {lineno}: not-uses needs '-> \"target\"'")
+                nots.append((_unquote(src, lineno), _unquote(dst, lineno)))
+                cur = None
             elif verb == "ignore":
                 ignored.append(rest.strip().strip('"').lower())
                 cur = None
@@ -171,6 +186,8 @@ class Ledger:
                     cur.claims.append(rest)
             elif verb == "reject":
                 cur.rejects.append(rest)
+            elif verb == "uses":
+                cur.uses.append(_unquote(rest, lineno))
             elif verb == "tier":
                 t = rest.lower()
                 if t not in TIERS:
@@ -183,7 +200,7 @@ class Ledger:
             else:
                 raise LedgerError(f"line {lineno}: unknown verb '{verb}'")
 
-        return cls(entries, merges, tombs, keeps, ignored)
+        return cls(entries, merges, tombs, keeps, ignored, nots)
 
     # -- replay -----------------------------------------------------------
     def owner(self, path: str) -> str | None:
@@ -259,6 +276,18 @@ class Ledger:
                      "entries": len(self.entries), "merges": len(self.merges),
                      "tombstones": len(self.tombstones)}
 
+    def relations(self) -> list[tuple[str, str]]:
+        """(source, target) pairs the owner stated, resolved through renames."""
+        merged = dict(self.merges)
+        out = []
+        for e in self.entries:
+            src = merged.get(e.name, e.name)
+            for u in e.uses:
+                dst = merged.get(u, u)
+                if src != dst:
+                    out.append((src, dst))
+        return out
+
     def tiers(self) -> dict[str, str]:
         return self._through_merges({e.name: e.tier for e in self.entries if e.tier})
 
@@ -282,7 +311,7 @@ class Ledger:
 
     def exists(self) -> bool:
         return bool(self.entries or self.merges or self.tombstones or self.keep_splits
-                    or self.ignored)
+                    or self.ignored or self.not_uses)
 
     # -- writing ----------------------------------------------------------
     def render(self) -> str:
@@ -292,6 +321,7 @@ class Ledger:
             out += [f"  claim  {g}" for g in e.claims]
             out += [f'  claim  {g} from "{src}"' for g, src in e.takes]
             out += [f"  reject {g}" for g in e.rejects]
+            out += [f'  uses   "{u}"' for u in e.uses]
             if e.tier:
                 out.append(f"  tier   {e.tier}")
             if e.note:
@@ -303,6 +333,7 @@ class Ledger:
         out += [f'reject     "{n}"' for n in self.tombstones]
         out += [f"keep-split {g}" for g in self.keep_splits]
         out += [f"ignore     {w}" for w in self.ignored]
+        out += [f'not-uses   "{a}" -> "{b}"' for a, b in self.not_uses]
         return "\n".join(out).rstrip() + "\n"
 
     def save(self, path: str | Path = PLAN_FILE) -> None:

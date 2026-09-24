@@ -170,7 +170,8 @@ def update_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
         raise typer.Exit(2)
     emit_register(conn, repo_path, res, emit, provider, log=_log)
     out_conn = connect(emit); init_db(out_conn)
-    _head("Relations"); build_relations(out_conn, repo_path, log=_log); out_conn.commit()
+    _head("Relations"); build_relations(out_conn, repo_path, log=_log, ledger=Ledger.load())
+    out_conn.commit()
     _head("Tiers"); assign_tiers(out_conn, Ledger.load(), log=_log)
     # Chapters live in the KB, which is rebuilt every run — so the LLM cache must NOT.
     # `provider` caches against the working DB, which persists, so every chapter already
@@ -284,7 +285,7 @@ def lineage_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: s
     from .taxonomy.tiers import assign_tiers
     out = connect(emit)
     init_db(out)
-    build_relations(out, cfg["repo"]["path"], log=_log)
+    build_relations(out, cfg["repo"]["path"], log=_log, ledger=Ledger.load())
     out.commit()
     assign_tiers(out, Ledger.load(), log=_log)
     out.close()
@@ -530,11 +531,12 @@ def dossier(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str =
 
 @app.command(hidden=True)
 def relations(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db):
-    """Infer built-on/uses edges between register features from static imports (local)."""
+    """Infer built-on/uses edges from static imports, plus the ones the plan states."""
+    from .taxonomy.ledger import Ledger
     from .taxonomy.relations import build_relations
     cfg, conn = _setup(config, repo, rev, db)
     _head("Relations")
-    build_relations(conn, cfg["repo"]["path"], log=_log)
+    build_relations(conn, cfg["repo"]["path"], log=_log, ledger=Ledger.load())
 
 
 @app.command(hidden=True)
