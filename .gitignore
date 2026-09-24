@@ -27,3 +27,14 @@ features.json
 
 # eval answers are regenerated output
 eval/*.result.json
+
+# your own curation lives at the repo root, not in this repository
+/gitchronicle.plan
+/gitchronicle.md
+
+# local model/provider cache and scratch
+.pytest_cache/
+
+# a real curation and eval set of a private repository stay out of the public one
+/eval/void-queue.json
+/examples/void-queue.*

@@ -1,0 +1,32 @@
+# A curation ledger, as it looks after reviewing a real repository.
+#
+# Replayed in file order on every run; the first matching rule wins. Nothing here names
+# anything the pipeline generated, so it keeps working as history grows.
+
+# A standalone tool the pipeline had smeared across a dozen features, because its commits
+# co-occur with whatever the tool was documenting that week.
+entry "Wiki Manager"
+  claim  tools/wiki_manager/**
+  tier   tooling
+  note   The standalone tool that builds the in-game wiki.
+
+# One framework, several trees — and one exception: per-feature schemas belong to their
+# own features, not to the scripting bridge that loads them.
+entry "Scripting Runtime"
+  claim  server/libscript/**
+  claim  scripting/**
+  reject scripting/protobuf/**
+  tier   framework
+
+# Splitting a wrongly-assembled entry: the reject releases the files, and `from` takes
+# only the ones that entry holds — `claim locale/**` alone would take every locale file
+# in the repository.
+entry "Quest Content"
+  reject locale/strings/**
+entry "Locale Strings"
+  claim  locale/strings/** from "Quest Content"
+  tier   content
+
+merge      "Wiki Builder Tabs" -> "Wiki Manager"   # same thing under two names
+reject     "Constinfo System"                      # not a real thing; never propose it again
+keep-split client/ui/**                            # genuinely many features share this folder
