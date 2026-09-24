@@ -1,13 +1,14 @@
 [project]
 name = "gitchronicle"
-version = "0.0.1"
-description = "Reconstruct a project's functional-feature chronicles from its git history into a queryable, navigable knowledge base"
+version = "0.5.0"
+description = "Turn a git repository into a knowledge base that answers questions about itself: what was built, when, why, and what it replaced"
 readme = "README.md"
 authors = [
     { name = "Matteo Roggia", email = "matteo.roggia@gmail.com" }
 ]
 license = "MIT"
-keywords = ["git", "knowledge-graph", "documentation", "clustering", "llm", "software-archaeology"]
+keywords = ["git", "knowledge-base", "documentation", "llm", "mcp", "software-archaeology",
+            "code-comprehension", "onboarding", "git-history"]
 # 3.11 floor: tomllib is stdlib from 3.11; keeps the tool installable well beyond the dev box.
 requires-python = ">=3.11"
 classifiers = [
@@ -25,7 +26,13 @@ dependencies = [
     "typer>=0.26.8",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Luscha/git-chronicle"
+Issues = "https://github.com/Luscha/git-chronicle/issues"
+Changelog = "https://github.com/Luscha/git-chronicle/blob/master/CHANGELOG.md"
+
 [project.optional-dependencies]
+dev = ["pytest>=8"]
 # Google Vertex AI as a chat provider: authorises with Application Default Credentials
 # instead of an API key. Only needed for providers.*.kind = "vertex".
 vertex = ["google-auth>=2.40"]
@@ -42,3 +49,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "gitchronicle.serve" = ["*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
