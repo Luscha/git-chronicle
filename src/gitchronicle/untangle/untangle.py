@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -133,7 +134,7 @@ def _stem_families(paths):
     leftover = []
     for p in paths:
         cands = sorted((s for s in stems_of[p] if freq[s] >= _FAMILY_MIN),
-                       key=lambda s: (freq[s], -len(s)))
+                       key=lambda s: (freq[s], -len(s), s))
         if cands:
             fam[cands[0]].append(p)
         else:
@@ -141,6 +142,7 @@ def _stem_families(paths):
     out = {}
     for s, fs in fam.items():
         if len(fs) < _FAMILY_MIN:
+            leftover += fs          # a size-1 bucket must fall back, never vanish
             continue
         dirs = {f.rsplit("/", 1)[0] if "/" in f else "" for f in fs}
         if len(fs) >= 6 and len(dirs) / len(fs) >= 0.8:   # scaffold dispersion signature
@@ -193,6 +195,7 @@ def _overflow_concerns(provider, repo, h, rows, repo_exts):
                 blocks.append(f"[{j}] family '{s}' ({rep.rsplit('/', 1)[-1]}):\n{head}")
             try:
                 got = provider.chat(PEEK_SYS, "\n\n".join(blocks), want_json=True,
+                                    role="untangle", stage="untangle",
                                     cache_extra=f"upeek:{h}:{i}")
             except Exception:  # noqa: BLE001
                 got = {}
@@ -305,7 +308,8 @@ def _infer_diff(provider, repo, h, subject, files, caps):
             f"Changed files:\n" + "\n".join(f"  {f}" for f in files) + "\n\n"
             f"DIFF:\n{diff or '(empty)'}\n\n{SCHEMA}")
     try:
-        return provider.chat(DIFF_SYS, user, want_json=True, cache_extra=f"udiff:{h}")
+        return provider.chat(DIFF_SYS, user, want_json=True, cache_extra=f"udiff:{h}",
+                             role="untangle", stage="untangle")
     except Exception:  # noqa: BLE001
         return {}
 
@@ -318,7 +322,8 @@ def _infer_msg(provider, repo, h, subject, body, files):
             f"Changed file paths:\n" + "\n".join(f"  {f}" for f in files[:14]) + "\n\n"
             'Return JSON: {"concerns":[{"label":"short capability phrase"}]}')
     try:
-        return provider.chat(MSG_SYS, user, want_json=True, cache_extra=f"umsg:{h}")
+        return provider.chat(MSG_SYS, user, want_json=True, cache_extra=f"umsg:{h}",
+                             role="untangle", stage="untangle")
     except Exception:  # noqa: BLE001
         return {}
 
@@ -336,10 +341,21 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
     if force:
         conn.execute("DELETE FROM concerns")
         conn.commit()
+    # The scope map is the authority on what the product IS, so evidence it excludes must
+    # not survive in the database. It gets there when the map is absent for one run (the
+    # fallback heuristics are wider): 247 concerns over 132 excluded commits, enough to
+    # change the catalogue. Widening the scope again simply re-untangles them.
+    stale = [r["id"] for r in conn.execute("SELECT id, files FROM concerns").fetchall()
+             if (fs := json.loads(r["files"] or "[]")) and not any(scope(f) for f in fs)]
+    if stale:
+        conn.executemany("DELETE FROM concerns WHERE id=?", [(i,) for i in stale])
+        conn.commit()
+        log(f"  {len(stale)} concerns dropped: every file out of scope (gitchronicle.md)")
+
     # Skip merge commits: with full-ancestry traversal the merged branch's individual commits are
     # already present and carry the granular content — the merge's diff would just double-count them.
     todo = conn.execute(
-        "SELECT c.hash, c.subject, c.body FROM commits c WHERE c.is_merge=0 "
+        "SELECT c.hash, c.subject, c.body, c.authored_at FROM commits c WHERE c.is_merge=0 "
         "AND NOT EXISTS (SELECT 1 FROM concerns cn WHERE cn.commit_hash=c.hash) "
         "ORDER BY c.authored_at").fetchall()
     if not todo:
@@ -367,8 +383,15 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                                        max_msg_files, min_subject_len) for r in todo}
     n_diff = sum(1 for r in todo if fileset[r["hash"]] and route[r["hash"]])
     n_msg = sum(1 for r in todo if fileset[r["hash"]] and not route[r["hash"]])
-    log(f"  untangling {len(todo)} commits ({workers} workers): "
-        f"{n_msg} message-routed (cheap), {n_diff} diff-routed (escalated) ...")
+    # A commit whose every file is out of scope yields nothing, which is correct and looks
+    # exactly like a silent failure: "untangling 349 commits ... 0 concerns" reads as 349
+    # lost API calls. Say that they were filtered, and re-selecting them every run is
+    # expected rather than a stuck queue.
+    n_skip = len(todo) - n_msg - n_diff
+    log(f"  untangling {n_msg + n_diff} commits ({workers} workers): "
+        f"{n_msg} message-routed (cheap), {n_diff} diff-routed (escalated) ..."
+        + (f"\n  {n_skip} skipped: every file out of scope (see gitchronicle.md)"
+           if n_skip else ""))
 
     def work(r):
         h, files = r["hash"], fileset[r["hash"]]
@@ -381,30 +404,23 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
                  if overflow_by.get(h) else [])
         return out, extra
 
+    # Newest first, and written as soon as every newer commit is done: the recent past is
+    # what gets asked about, so a first run is useful long before it reaches 2016, and an
+    # interrupted one keeps everything it wrote. Writes follow this fixed order, not
+    # completion order, so concern ids stay reproducible.
+    order = sorted(todo, key=lambda r: (r["authored_at"] or "", r["hash"]), reverse=True)
     results: dict[str, object] = {}
-    fetched = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {}
-        for r in todo:
-            if not fileset[r["hash"]]:
-                results[r["hash"]] = ({}, [])
-                continue
-            futs[ex.submit(work, r)] = r["hash"]
-        for fut in as_completed(futs):
-            results[futs[fut]] = fut.result()
-            fetched += 1
-            if fetched % 200 == 0 or fetched == len(futs):
-                log(f"    {fetched}/{len(futs)} inferred")
-
-    # Insert in deterministic todo (authored_at) order so concern ids are reproducible.
     done = nconc = nimp = 0
-    for r in todo:
+    t0 = time.monotonic()
+
+    def write(r):
+        nonlocal done, nconc, nimp
         h = r["hash"]
         files = fileset[h]
         if not files:
             mark_stage(conn, "untangle", h)
-            continue
-        out, extra = results.get(h) or ({}, [])
+            return
+        out, extra = results.pop(h, None) or ({}, [])
         for cc in _coerce(out, files, (r["subject"] or "change")[:80]):
             # msg-routed commits get no LLM summary; the subject is the change's one-liner.
             summary = cc["summary"] or (None if route[h] else (r["subject"] or "").strip()[:300])
@@ -421,8 +437,26 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
             nimp += cc["origin"] == "import"
         mark_stage(conn, "untangle", h)
         done += 1
-        if done % 500 == 0 or done == len(todo):
-            conn.commit()
+
+    k = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(work, r): r["hash"] for r in order if fileset[r["hash"]]}
+        fetched = 0
+        for fut in as_completed(futs):
+            results[futs[fut]] = fut.result()
+            fetched += 1
+            while k < len(order) and (not fileset[order[k]["hash"]]
+                                      or order[k]["hash"] in results):
+                write(order[k])
+                k += 1
+            if fetched % 200 == 0 or fetched == len(futs):
+                conn.commit()
+                reach = (order[k - 1]["authored_at"] or "")[:10] if k else "—"
+                log(f"    {fetched}/{len(futs)} inferred · written back to {reach} · "
+                    f"{(time.monotonic() - t0) / 60:.1f} min")
+    while k < len(order):
+        write(order[k])
+        k += 1
     conn.commit()
     log(f"  {nconc} concerns from {done} commits (avg {nconc / max(done, 1):.1f}/commit); "
         f"routed {n_msg} message / {n_diff} diff; {nimp} peek-labelled import families")

@@ -6,6 +6,9 @@
      `exclude:` glob. Review the drafted verdicts — the evidence for each is
      in the comment. Scope edits re-run analysis for affected commits. -->
 
+- include: Locale/italy/quest/**
+- include: Locale/italy/libs/**
+- include: Locale/italy/system/**
 - exclude: Locale/**    <!-- 20559 files, 43161 touches, 2019-01-03→2026-07-06, exts svn-base,msa,quest,txt (repo-overlap 0.88) -->
 - exclude: Locale/data/**    <!-- 18420 files, 30771 touches, 2019-01-03→2026-07-04, exts svn-base,msa,msm,txt (repo-overlap 0.95) -->
 - exclude: Extern-Server/Extern/**    <!-- 13345 files, 28199 touches, 2020-07-22→2024-02-01 (gone from worktree), exts hpp,h,cpp,ipp (repo-overlap 0.97) -->
@@ -15,7 +18,7 @@
 - exclude: Client-Files/locale/**    <!-- 1123 files, 5665 touches, 2019-01-22→2026-07-04, exts txt,html,py,yaml (repo-overlap 0.54) -->
 - exclude: thirdparty/python3/**    <!-- 4905 files, 4905 touches, 2025-12-27→2025-12-27, exts py,h,rst,c (repo-overlap 0.72) -->
 - exclude: thirdparty/bgfx/**    <!-- 4005 files, 4009 touches, 2024-04-13→2026-06-20, exts txt,h,cpp,bin (repo-overlap 0.69), ecosystem markers -->
-- exclude: Web-Sites/CCC/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
+- acknowledge: Web-Sites/CCC/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
 - exclude: Web-Sites/**    <!-- 1858 files, 3721 touches, 2021-09-08→2025-01-22 (gone from worktree), exts js,html,gif,css (repo-overlap 0.02) -->
 - exclude: thirdparty/python/**    <!-- 1704 files, 2607 touches, 2024-04-13→2026-06-20, exts c,h,pyc,py (repo-overlap 0.73) -->
 - exclude: thirdparty/cython/**    <!-- 2124 files, 2124 touches, 2024-04-13→2024-05-16, exts pyx,py,pxd,srctree (repo-overlap 0.18), ecosystem markers -->
@@ -67,26 +70,42 @@
 - include: Client/EffectLibrary/**    <!-- 41 files, 445 touches, 2019-01-03→2026-05-27, exts cpp,h,vcxproj,txt (repo-overlap 0.96) -->
 - include: core/include/**    <!-- 29 files, 413 touches, 2024-02-01→2026-06-30, exts hpp,h (repo-overlap 1.0) -->
 
+## Direction
+
+<!-- OPTIONAL. Delete this whole section for auto mode — the pipeline then behaves
+     exactly as if it were never here. Typed statements only; free prose was tried in
+     v0.1 and measured ineffective.
+
+       voice:     how the narration should read
+       audience:  who it is for
+       glossary:  <term> = <what it means here>, for things paths cannot reveal
+       rule:      a standing instruction about grain or naming
+
+     Direction text joins the prompts, so editing it changes the cache key and re-pays
+     the naming and chronicle passes. -->
+
+<!-- A TEMPLATE, inactive. Uncomment the lines you want and re-run. The glossary
+     entries below are guesses from the code, not facts — correct them before use.
+
+- audience: the person who built this, reading it years later
+- voice: Plain and concrete. Name the actual mechanism. No marketing language.
+- glossary: luna = the embedded Lua scripting bridge the server registers handlers against
+- glossary: forge = the quest/event DSL built on top of luna
+- glossary: uchtml = the in-client HTML renderer used by the wiki
+- rule: Item prototypes, item stats, item bonuses and item attributes are ONE system.
+- rule: Skills and the Skill Tree are DISTINCT; never merge them.
+-->
+
 ## Charter
 
-<!-- Owner knowledge the repository cannot express — plain sentences, consumed ONLY by
-     the feature-naming stages (never per-commit analysis, never assignment picks).
-     Statements that work:
-       - "<X> and <Y> are one feature"
-       - "<X> and <Y> are distinct features, never merge them"
-       - "UI windows/screens belong to the feature they serve"
-       - one or two lines describing what this project IS -->
+Metin2-derived MMO game: C++ game server, C++/Python client, launcher, world editor
+tooling. Features are gameplay capabilities and their supporting engine systems.
 
-(describe the project here)
-
-<!-- the census found related vocabulary that may need a ruling —
-     one sentence each turns a guess into a rule: -->
-<!-- python: python network, python player, python library, python application, python item -->
-<!-- player: player, player input, player skill -->
-<!-- char: char item, char state, char manager -->
-<!-- tree: tree library, tree forest, tree wrapper -->
-<!-- wiki: wiki, wiki config, wiki render -->
-<!-- image: image, image library, image instance -->
-<!-- frame: frame, frame context, frame eval -->
-<!-- test: test compiler, test high, test scripts -->
-<!-- quest: quest three, quest skipia, quest desert, quest snow, quest spider -->
+- Item prototypes, item stats, item bonuses and item attributes are ONE feature: the
+  item system. Do not split them.
+- Horse riding, horse mechanics and horse skills are ONE feature.
+- Skills and Skill Tree are DISTINCT features; never merge them.
+- UI windows, panels and screens belong to the feature they serve (a skill tree window
+  is part of Skill Tree); only reusable UI building blocks used by many features stand
+  alone as UI framework components.
+- Raids, dungeons and world bosses are separate features unless the code says otherwise.

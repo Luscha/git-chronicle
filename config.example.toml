@@ -1,63 +1,111 @@
-# gitchronicle configuration — copy this to `config.toml` and edit.
-#   cp config.example.toml config.toml
-# `config.toml` is git-ignored (it holds your local paths); this template is committed.
-# CLI flags (--repo, --rev, --db, --out) override anything here. Algorithm params not shown
-# have sensible generic defaults (see src/gitchronicle/config.py DEFAULTS) — no per-repo tuning.
+# gitchronicle — copy to `config.toml` and edit. `config.toml` is git-ignored.
+#   cp config.example.toml config.toml && gitchronicle doctor
+# CLI flags (--repo, --rev, --db) override anything here.
 
 [repo]
 path = "/path/to/your/repo"
-# Analyse the DEFAULT BRANCH's full history: every commit reachable from its tip — which INCLUDES
-# all merged-PR commits (they became ancestors when merged), while never-merged feature branches
-# are naturally excluded. Merge commits are skipped in untangle (their content is the individual
-# commits they merge). Anchor at the default branch, not the ambient checkout.
-rev_range = "origin/master"   # e.g. "origin/main", or a range like "v1.0..origin/master"
+# The DEFAULT BRANCH's full history: every commit reachable from its tip, which includes
+# everything merged into it. Anchor on the branch, not on whatever is checked out.
+rev_range = "origin/main"
 
 [db]
-path = "build/gitchronicle.db"
-
-[catalog]
-# How domains are formed from concerns:
-#   "taxonomy" = induce a fixed feature taxonomy once (clustered facets, contrastive naming,
-#                definitions), then classify every concern against it BY ID; drift becomes
-#                provisional features + an optional review seam. (Recommended, default.)
-#   "leiden"   = embedding clustering of concern labels (no chat LLM, no naming; legacy).
-method = "taxonomy"
-
-[untangle]
-workers = 6   # concurrent LLM calls; lower this if your provider rate-limits (HTTP 429)
+# The working database: commits, concerns and the model cache. Keep it; it is what makes
+# a rebuild free.
+path = "build/work.db"
 
 [output]
-html = "build/graph.html"    # interactive knowledge-base browser (self-contained HTML)
-json = "build/domains.json"  # machine-readable export to build your own site on top of
+kb = "build/kb.db"        # the knowledge base `update` rebuilds
+kb_dir = "build/kb"       # dossiers + kb.html
 
-# --- providers (any OpenAI-compatible endpoint; secrets read from .env via env: prefix) ---
-# The chat model does per-commit untangle + naming: the dominant cost (O(commits)). Model choice
-# matters — a <=3B model is too weak; 7B is the usable floor; 14-32B is the sweet spot. Use a cloud
-# API (below) or a local 14B+ on a GPU. See the README "Choosing a model & provider".
+[untangle]
+workers = 8               # concurrent model calls; lower it if your provider rate-limits
+
+# --- models ------------------------------------------------------------------------
+# Only [providers.chat] is required; every other role falls back to it. Roles exist so
+# one job can use a different model from another:
+#
+#   untangle    one call per commit — the bulk of the bill. A 14-32B model is the sweet
+#               spot; <=3B is too weak to be useful, 7B is the floor.
+#   naming      produces the names in your catalogue. PIN IT: changing this model renames
+#               everything and churns curation (once: 118 entries "gone", 125 "new").
+#   narration   writes the stories. Modest volume; pick for prose.
+#   chat_large  answering questions (`ask`) and grading (`eval`). A few calls.
+#   embed       OPTIONAL and unused by the pipeline — search is SQLite full-text.
+#
+# kind: openai (anything OpenAI-compatible), ollama, anthropic, azure, vertex.
+# api_key = "env:VAR" reads VAR from the environment or .env.
+
 [providers.chat]
 kind = "openai"
-base_url = "https://api.scaleway.ai/v1"     # any OpenAI-compatible base URL
-model = "qwen3-coder-30b-a3b-instruct"
-api_key = "env:YOUR_API_KEY"                # reads $YOUR_API_KEY from the environment / .env
-temperature = 0.0   # deterministic decoding
-seed = 7            # reproducible sampling
+base_url = "https://api.openai.com/v1"   # or Groq, OpenRouter, Together, llama.cpp, ...
+model = "gpt-5-mini"
+api_key = "env:OPENAI_API_KEY"
+temperature = 0.0      # deterministic decoding
+seed = 7               # reproducible sampling, where the endpoint honours it
 timeout = 120
 
-# "Big model" role: dependency judgment, near-duplicate merge, `ask` — few, simple calls.
-[providers.chat_large]
-kind = "openai"
-base_url = "https://api.scaleway.ai/v1"
-model = "llama-3.3-70b-instruct"
-api_key = "env:YOUR_API_KEY"
-temperature = 0.0
-seed = 7
-timeout = 180
+# THINKING MODELS bill their reasoning as output, and it dominated the bill: 52% of all
+# untangle tokens on Gemini 2.5 Flash, for nothing the eval could see. Turning it off took
+# 6,574 commits from $30 and ~5 h to $7.51 and 30 min.
+#   thinking_budget = 0                  # Gemini (Vertex rejects reasoning_effort="none")
+#   reasoning_effort = "low"             # OpenAI-style endpoints
+#
+# Anything else your endpoint accepts, without waiting for a release:
+#   headers = { x-org = "acme" }         # gateway keys, tenancy, org ids
+#   query   = { "api-version" = "2024-10-21" }
+#   params  = { max_tokens = 4096, top_p = 1 }
+#   json_mode = false                    # for endpoints that reject response_format
 
-# Embeddings (semantic search index). Local + multilingual by default (Ollama).
-[providers.embed]
-kind = "ollama"
-base_url = "http://localhost:11434/v1"
-model = "bge-m3"
-api_key = "ollama"
-batch = 16
-timeout = 900
+# A local model needs no key:
+# [providers.chat]
+# kind = "ollama"
+# base_url = "http://localhost:11434/v1"
+# model = "qwen2.5-coder:14b"
+# api_key = "ollama"
+
+# Anthropic speaks its own Messages API:
+# [providers.chat]
+# kind = "anthropic"
+# model = "claude-sonnet-5"
+# api_key = "env:ANTHROPIC_API_KEY"
+
+# Google Vertex authorises with Application Default Credentials — no API key:
+#   gcloud auth application-default login && pip install -e '.[vertex]'
+# [providers.chat]
+# kind = "vertex"
+# project = "my-gcp-project"     # defaults to the project ADC carries
+# location = "us-central1"
+# model = "google/gemini-2.5-flash"
+# thinking_budget = 0
+
+# Azure OpenAI wants its deployment URL, its own header and an api-version:
+# [providers.chat]
+# kind = "azure"
+# base_url = "https://my-resource.openai.azure.com/openai/deployments/my-deployment"
+# model = "my-deployment"
+# api_key = "env:AZURE_OPENAI_KEY"
+# api_version = "2024-10-21"
+
+# Pin naming to whatever named the catalogue first; those answers are cached, so it is
+# free to keep while `chat` moves on.
+# [providers.naming]
+# kind = "openai"
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-5-mini"
+# api_key = "env:OPENAI_API_KEY"
+
+# --- optional ----------------------------------------------------------------------
+# Prices per MILLION tokens, for `gitchronicle cost`. Yours may differ; unpriced models
+# still report their tokens.
+# [pricing."gpt-5-mini"]
+# input = 0.25
+# output = 2.00
+
+# Golden probes: things you KNOW are one framework, as a path fragment. The rebuild is
+# refused when the assembly scatters one of them (70% of its concerns must share a
+# cluster). Repo-specific by nature — there is no useful default.
+# [lineage.golden]
+# scripting = "/scripting/"
+
+# [lineage]
+# canonical_paths = true   # territory speaks in each file's CURRENT name (renames resolved)

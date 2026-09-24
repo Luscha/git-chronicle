@@ -1,11 +1,23 @@
 """A thin, provider-agnostic LLM layer.
 
 Two capabilities — ``chat`` and ``embed`` — over any OpenAI-compatible endpoint
-(Ollama, OpenAI, Scaleway, ...). Chat responses are cached in ``llm_cache`` so
+(Ollama, OpenAI, Scaleway, Vertex, ...). Chat responses are cached in ``llm_cache`` so
 re-labelling never re-pays. Swapping providers is a config change, not a code change.
 
-Anthropic (chat-only, no embeddings endpoint) would be a separate adapter; it is
-intentionally not wired for the local-first slice.
+``kind="vertex"`` reaches Vertex AI through its OpenAI-compatible surface, so it reuses
+the OpenAI request path entirely and differs only in how it authorises: no API key, an
+OAuth token minted from Application Default Credentials. Vertex exposes no
+OpenAI-compatible *embeddings* endpoint — keep embeddings on Ollama (or another
+OpenAI-compatible provider) when chat runs on Vertex.
+
+``kind="anthropic"`` speaks the native Messages API, and ``kind="azure"`` adds the
+api-key header and api-version query Azure OpenAI wants. Anything else that speaks
+OpenAI (Groq, OpenRouter, llama.cpp, LM Studio, Together, ...) needs no adapter: give it
+a ``base_url``. Provider-specific knobs never need code — ``headers``, ``query`` and
+``params`` are passed through as written.
+
+Embeddings are optional: nothing in the current pipeline embeds, and a config without an
+``embed`` role simply cannot call ``embed()``.
 """
 
 from __future__ import annotations
@@ -52,6 +64,135 @@ class LLMError(RuntimeError):
     pass
 
 
+class NotCached(LLMError):
+    """A cache-only provider was asked for something it has never paid for."""
+
+
+_VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+class _AuthResponse:
+    """google-auth's transport response shape (status/headers/data)."""
+
+    def __init__(self, resp: httpx.Response):
+        self.status = resp.status_code
+        self.headers = resp.headers
+        self.data = resp.content
+
+
+class _HttpxAuthRequest:
+    """google-auth's transport interface over httpx.
+
+    google-auth ships transports for `requests`, `urllib3` and gRPC; this project speaks
+    httpx everywhere, so the token refresh borrows that client rather than making the
+    vertex extra drag in a second HTTP stack.
+    """
+
+    def __init__(self):
+        self._client = httpx.Client(timeout=60)
+
+    def __call__(self, url, method="GET", body=None, headers=None, timeout=None, **kwargs):
+        return _AuthResponse(self._client.request(
+            method, url, content=body, headers=headers, timeout=timeout or 60))
+
+
+class _ADCToken:
+    """OAuth bearer minted from Application Default Credentials.
+
+    Vertex refuses API keys. Its tokens live about an hour — less than a full untangle
+    over a large history — so the token is refreshed in place instead of being resolved
+    once at startup, and the refresh is locked because untangle runs several workers
+    against this one credential.
+    """
+
+    _SKEW = 300.0        # refresh this early: a call must not start on a dying token
+
+    def __init__(self):
+        try:
+            import google.auth
+        except ImportError as exc:
+            raise LLMError("kind='vertex' needs google-auth: pip install 'gitchronicle[vertex]'"
+                           ) from exc
+        self._request = _HttpxAuthRequest()
+        self._creds, self.project = google.auth.default(scopes=[_VERTEX_SCOPE])
+        self._lock = threading.Lock()
+
+    def token(self) -> str:
+        with self._lock:
+            if not self._creds.token or self._stale():
+                self._creds.refresh(self._request)
+            return self._creds.token
+
+    def _stale(self) -> bool:
+        exp = getattr(self._creds, "expiry", None)
+        if exp is None:
+            return False
+        from datetime import datetime, timezone
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return (exp - datetime.now(timezone.utc)).total_seconds() < self._SKEW
+
+
+_adc: _ADCToken | None = None
+_adc_lock = threading.Lock()
+
+
+def _adc_token() -> _ADCToken:
+    """The process-wide ADC credential (built on first use, so non-Vertex runs never
+    touch google-auth and never need it installed)."""
+    global _adc
+    with _adc_lock:
+        if _adc is None:
+            _adc = _ADCToken()
+    return _adc
+
+
+def _auth_header(cfg: dict) -> dict:
+    kind = cfg.get("kind", "openai")
+    if kind == "vertex":
+        h = {"Authorization": f"Bearer {_adc_token().token()}"}
+        if cfg.get("project"):
+            # user ADC (`gcloud auth application-default login`) carries no billing
+            # project of its own; Vertex bills and quotas against this one.
+            h["x-goog-user-project"] = str(cfg["project"])
+    elif kind == "anthropic":
+        h = {"x-api-key": cfg.get("api_key", ""),
+             "anthropic-version": cfg.get("anthropic_version", "2023-06-01")}
+    elif kind == "azure":
+        # Azure OpenAI authorises with its own header, not a bearer token
+        h = {"api-key": cfg.get("api_key", "")}
+    else:
+        h = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+    # whatever the endpoint in front of the model needs: org ids, gateway keys, tenancy
+    h.update({str(k): str(v) for k, v in (cfg.get("headers") or {}).items()})
+    return h
+
+
+def _url(cfg: dict, path: str) -> str:
+    """Endpoint URL, with any query the provider needs (Azure wants api-version)."""
+    base = cfg["base_url"].rstrip("/")
+    if cfg.get("kind") == "anthropic" and base.endswith("/v1"):
+        base = base[:-3]                      # /v1/messages is appended whole
+    url = base + path
+    q = dict(cfg.get("query") or {})
+    if cfg.get("kind") == "azure" and "api-version" not in q:
+        q["api-version"] = cfg.get("api_version", "2024-10-21")
+    if q:
+        from urllib.parse import urlencode
+        url += ("&" if "?" in url else "?") + urlencode(q)
+    return url
+
+
+def _vertex_base_url(cfg: dict) -> str:
+    """The OpenAI-compatible surface; the caller's client appends /chat/completions."""
+    loc = cfg.get("location") or "us-central1"
+    project = cfg.get("project") or _adc_token().project
+    if not project:
+        raise LLMError("vertex: set providers.<role>.project (ADC carries no default project)")
+    host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
+    return f"https://{host}/v1/projects/{project}/locations/{loc}/endpoints/openapi"
+
+
 def _extract_json(text: str) -> dict:
     """Tolerant JSON parse: handles code fences / prose around the object."""
     text = text.strip()
@@ -68,21 +209,45 @@ def _extract_json(text: str) -> dict:
 class Provider:
     """Holds chat + embed endpoint configs and a DB connection for caching."""
 
-    def __init__(self, chat_cfg: dict, embed_cfg: dict, chat_large_cfg: dict | None = None, conn=None):
+    def __init__(self, chat_cfg: dict, embed_cfg: dict | None = None,
+                 chat_large_cfg: dict | None = None, conn=None, roles: dict | None = None):
         self.chat_cfg = chat_cfg
         self.chat_large_cfg = chat_large_cfg or chat_cfg
         self.embed_cfg = embed_cfg
+        # Named roles beyond chat/chat_large. Naming and narration are different jobs:
+        # naming wants the model whose answers the catalogue was built on (its output IS
+        # the entry name, so changing model renames everything and churns the catalogue),
+        # narration wants whichever model writes the best prose. Unset roles fall back to
+        # chat, so a single-provider config behaves exactly as before.
+        self.roles = {"chat": chat_cfg, "chat_large": self.chat_large_cfg,
+                      **(roles or {})}
         self.conn = conn
+        self.cache_only = False
         self.db_lock = threading.Lock()   # guards the shared sqlite conn (concurrent untangle)
         timeout = max(float(chat_cfg.get("timeout", 900)),
                       float(self.chat_large_cfg.get("timeout", 900)))
         self._client = httpx.Client(timeout=timeout)
 
+    # each role falls back along a chain, so configuring none of them is valid and
+    # configuring one of them changes only that job
+    _FALLBACK = {"untangle": ("chat",), "narration": ("chat",), "naming": ("chat",),
+                 "judge": ("chat_large", "chat"), "chat_large": ("chat",)}
+
+    def _role_cfg(self, role: str) -> dict:
+        for r in (role, *self._FALLBACK.get(role, ())):
+            cfg = self.roles.get(r)
+            if cfg:
+                return cfg
+        return self.chat_cfg
+
     # -- embeddings -------------------------------------------------------
     def embed(self, texts: list[str]) -> np.ndarray:
         cfg = self.embed_cfg
-        url = cfg["base_url"].rstrip("/") + "/embeddings"
-        headers = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+        if not cfg:
+            raise LLMError("no [providers.embed] configured — nothing in the pipeline "
+                           "embeds; only the legacy commands do.")
+        url = _url(cfg, "/embeddings")
+        headers = _auth_header(cfg)
         batch = int(cfg.get("batch", 16))
         out: list[list[float]] = []
         for i in range(0, len(texts), batch):
@@ -95,27 +260,38 @@ class Provider:
 
     # -- chat -------------------------------------------------------------
     def chat(self, system: str, user: str, want_json: bool = True,
-             cache_extra: str = "", large: bool = False) -> dict | str:
-        cfg = self.chat_large_cfg if large else self.chat_cfg
+             cache_extra: str = "", large: bool = False,
+             role: str | None = None, stage: str = "") -> dict | str:
+        cfg = self._role_cfg(role or ("chat_large" if large else "chat"))
         provider, model = cfg.get("kind", "openai"), cfg["model"]
         # Generation params are part of the identity of a response — cache on them too, so
         # changing temperature/seed correctly invalidates stale entries.
         key = _cache_key(provider, model, "chat", system, user, cache_extra,
-                         str(cfg.get("temperature", "")), str(cfg.get("seed", "")))
+                         str(cfg.get("temperature", "")), str(cfg.get("seed", "")),
+                         # part of the key only when set, so existing caches stay valid
+                         *[f"{k}={cfg[k]}" for k in ("reasoning_effort", "thinking_budget")
+                           if cfg.get(k) is not None])
         cached = self._cache_get(key)
         if cached is not None:
             return _extract_json(cached) if want_json else cached
+        if self.cache_only:
+            raise NotCached(key)
 
         if provider == "ollama":
             content, usage = self._chat_ollama(cfg, system, user, want_json)
+        elif provider == "anthropic":
+            content, usage = self._chat_anthropic(cfg, system, user, want_json)
         else:
             content, usage = self._chat_openai(cfg, system, user, want_json)
-        self._cache_put(key, provider, model, content, usage)
+        # the row remembers WHICH job paid, so `gitchronicle cost` can say where the
+        # money went rather than only how much
+        self._cache_put(key, provider, model, content, usage,
+                        stage or role or ("chat_large" if large else "chat"))
         return _extract_json(content) if want_json else content
 
     def _chat_openai(self, cfg: dict, system: str, user: str, want_json: bool):
-        url = cfg["base_url"].rstrip("/") + "/chat/completions"
-        headers = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+        url = _url(cfg, "/chat/completions")
+        headers = _auth_header(cfg)
         payload = {
             "model": cfg["model"],
             "messages": [{"role": "system", "content": system},
@@ -124,10 +300,44 @@ class Provider:
         }
         if cfg.get("seed") is not None:   # reproducible sampling (generic; honoured where supported)
             payload["seed"] = int(cfg["seed"])
-        if want_json:
+        # Thinking models reason before answering and bill it as output: on untangle it
+        # was over half of all tokens. Gemini takes a budget (0 = off; Vertex rejects
+        # reasoning_effort="none"), other endpoints take reasoning_effort.
+        if cfg.get("reasoning_effort"):
+            payload["reasoning_effort"] = cfg["reasoning_effort"]
+        if cfg.get("thinking_budget") is not None:
+            payload["extra_body"] = {"google": {"thinking_config": {
+                "thinking_budget": int(cfg["thinking_budget"])}}}
+        # anything else the endpoint accepts (max_tokens, top_p, provider extensions):
+        # written into the body as given, so a new knob never needs a new release
+        payload.update(cfg.get("params") or {})
+        # json_mode=false is the escape hatch for endpoints that reject response_format;
+        # _extract_json already tolerates a model that answers with prose around the object.
+        if want_json and cfg.get("json_mode", True):
             payload["response_format"] = {"type": "json_object"}
         data = self._post(url, payload, headers)
         return data["choices"][0]["message"]["content"], data.get("usage")
+
+    def _chat_anthropic(self, cfg: dict, system: str, user: str, want_json: bool):
+        """The native Messages API: system is its own field, and JSON mode does not exist
+        — the prompt already asks for JSON and _extract_json tolerates prose around it."""
+        payload = {
+            "model": cfg["model"],
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "max_tokens": int(cfg.get("max_tokens", 4096)),
+            "temperature": float(cfg.get("temperature", 0.2)),
+        }
+        budget = cfg.get("thinking_budget")
+        if budget:
+            payload["thinking"] = {"type": "enabled", "budget_tokens": int(budget)}
+        payload.update(cfg.get("params") or {})
+        data = self._post(_url(cfg, "/v1/messages"), payload, _auth_header(cfg))
+        text = "".join(b.get("text", "") for b in data.get("content", [])
+                       if b.get("type") == "text")
+        u = data.get("usage") or {}
+        return text, {"prompt_tokens": u.get("input_tokens"),
+                      "completion_tokens": u.get("output_tokens")}
 
     def _chat_ollama(self, cfg: dict, system: str, user: str, want_json: bool):
         """Ollama's native /api/chat — lets us cap threads/context (num_thread,
@@ -196,17 +406,22 @@ class Provider:
             row = self.conn.execute("SELECT response FROM llm_cache WHERE key=?", (key,)).fetchone()
         return row["response"] if row else None
 
-    def _cache_put(self, key, provider, model, response, usage) -> None:
+    def _cache_put(self, key, provider, model, response, usage, stage: str = "chat") -> None:
         if self.conn is None:
             return
         ti = (usage or {}).get("prompt_tokens")
         to = (usage or {}).get("completion_tokens")
+        # thinking models bill their reasoning as output but may leave it out of
+        # completion_tokens; the total is what the invoice counts
+        total = (usage or {}).get("total_tokens")
+        if total and ti is not None and total - ti > (to or 0):
+            to = total - ti
         with self.db_lock:
             self.conn.execute(
                 "INSERT OR REPLACE INTO llm_cache "
                 "(key, provider, model, kind, response, tokens_in, tokens_out, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (key, provider, model, "chat", response, ti, to, now_iso()),
+                (key, provider, model, stage, response, ti, to, now_iso()),
             )
             self.conn.commit()
 
@@ -232,19 +447,48 @@ def _resolve_secret(value):
     return value
 
 
+ROLES = ("chat", "chat_large", "embed", "naming", "untangle", "narration", "judge")
+KINDS = ("openai", "azure", "anthropic", "ollama", "vertex")
+
+
 def build_provider(cfg: dict, conn=None) -> Provider:
-    """Construct a Provider from the merged config's ``providers`` section."""
+    """Construct a Provider from the merged config's ``providers`` section.
+
+    Every role but ``chat`` is optional and falls back to it, so a one-provider config is
+    three lines and a per-stage split is opt-in.
+    """
     providers = cfg.get("providers", {})
+    if "chat" not in providers:
+        raise LLMError("no [providers.chat] in the config — every run needs one chat "
+                       "model. See config.example.toml.")
     resolved = {}
-    for name in ("chat", "embed", "chat_large"):
-        if name not in providers:
-            continue
-        pc = dict(providers[name])
-        if pc.get("kind") == "anthropic":
-            raise LLMError(
-                f"providers.{name}.kind='anthropic' is not supported; "
-                "use an OpenAI-compatible endpoint (ollama/openai/together/scaleway)."
-            )
+    for name, pc in providers.items():
+        if name not in ROLES:
+            raise LLMError(f"unknown role [providers.{name}]; roles are {', '.join(ROLES)}")
+        pc = dict(pc)
+        kind = pc.get("kind", "openai")
+        if kind not in KINDS:
+            raise LLMError(f"providers.{name}.kind='{kind}' is not one of {', '.join(KINDS)}")
+        if kind == "vertex":
+            if name == "embed":
+                raise LLMError(
+                    "providers.embed.kind='vertex': Vertex exposes no OpenAI-compatible "
+                    "embeddings endpoint. Keep embeddings on ollama."
+                )
+            pc["project"] = pc.get("project") or _adc_token().project
+            # config.toml is merged OVER built-in defaults, so a base_url belonging to a
+            # different provider survives when this role is switched to vertex — and then
+            # silently wins. Any endpoint that is not Vertex's is wrong here by definition.
+            if "aiplatform.googleapis.com" not in (pc.get("base_url") or ""):
+                pc["base_url"] = _vertex_base_url(pc)
+        if kind == "anthropic" and not pc.get("base_url"):
+            pc["base_url"] = "https://api.anthropic.com"
+        if not pc.get("base_url"):
+            raise LLMError(f"providers.{name} needs a base_url (kind={kind})")
+        if not pc.get("model"):
+            raise LLMError(f"providers.{name} needs a model")
         pc["api_key"] = _resolve_secret(pc.get("api_key", ""))
         resolved[name] = pc
-    return Provider(resolved["chat"], resolved["embed"], resolved.get("chat_large"), conn=conn)
+    extra = {k: v for k, v in resolved.items() if k not in ("chat", "embed", "chat_large")}
+    return Provider(resolved["chat"], resolved.get("embed"), resolved.get("chat_large"),
+                    conn=conn, roles=extra)

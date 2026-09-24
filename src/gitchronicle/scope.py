@@ -28,6 +28,18 @@ from .extract.git_ingest import run_git
 
 MD_FILE = "gitchronicle.md"
 
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def _uncommented(section: str) -> str:
+    """Section text with HTML comments removed, including multi-line ones.
+
+    Stripping per line only reaches comments that open and close on that line, so a
+    commented-out BLOCK stayed fully live — a template meant to be inactive was parsed
+    and silently applied. Both readers share this so neither can drift back.
+    """
+    return _COMMENT_RE.sub("", section)
+
 _MARKERS = {"license", "license.txt", "license.md", "license_1_0.txt", "copying",
             "package.json", "cargo.toml", "setup.py", "pom.xml", "gemfile"}
 
@@ -143,30 +155,57 @@ def draft_scope(repo: str, md_path: str | Path = MD_FILE) -> str:
 
 
 class Scope:
-    """Parsed runtime filter. The ONLY authority on what the pipeline sees."""
+    """Parsed runtime filter. The ONLY authority on what the pipeline sees.
+    Verdicts: include (analysed), exclude (invisible), acknowledge (owned sub-product:
+    catalogued as ONE feature, its internals never analysed)."""
 
-    def __init__(self, includes: list[str], excludes: list[str]):
+    def __init__(self, includes: list[str], excludes: list[str],
+                 acknowledges: list[str] | None = None):
         self.includes = includes or ["**"]
         self.excludes = excludes
+        self.acknowledges = acknowledges or []
 
     @classmethod
     def load(cls, md_path: str | Path = MD_FILE) -> "Scope":
         p = Path(md_path)
-        inc, exc = [], []
+        inc, exc, ack = [], [], []
         if p.exists():
             m = re.search(r"## Scope.*?(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
-            for ln in (m.group(0) if m else "").splitlines():
-                ln = re.sub(r"<!--.*?-->", "", ln).strip()
-                mm = re.match(r"-\s*(include|exclude):\s*(\S+)", ln)
+            for ln in _uncommented(m.group(0) if m else "").splitlines():
+                ln = ln.strip()
+                mm = re.match(r"-\s*(include|exclude|acknowledge):\s*(\S+)", ln)
                 if mm:
-                    (inc if mm.group(1) == "include" else exc).append(mm.group(2))
-        return cls(inc, exc)
+                    {"include": inc, "exclude": exc,
+                     "acknowledge": ack}[mm.group(1)].append(mm.group(2))
+        return cls(inc, exc, ack)
 
     def __call__(self, path: str) -> bool:
-        """True when the path is IN scope."""
+        """True when the path is IN scope. Semantics: an explicit include wins (it can
+        carve a code pocket back out of an excluded tree), exclude/acknowledge carve out,
+        and everything the map never mentions is IN — silence must not exclude."""
+        if any(fnmatch.fnmatch(path, g) for g in self.includes if g != "**"):
+            return True
         if any(fnmatch.fnmatch(path, g) for g in self.excludes):
             return False
-        return any(fnmatch.fnmatch(path, g) for g in self.includes)
+        if any(fnmatch.fnmatch(path, g) for g in self.acknowledges):
+            return False
+        return True
+
+    def shadowed(self) -> list[tuple[str, str]]:
+        """Excludes an include already overrides — they read as filters and do nothing.
+
+        An explicit include wins by design, so it can carve a pocket of code back out of
+        an excluded tree; the cost is that a narrower exclude written under a broader
+        include is silently inert, which is a trap worth reporting.
+        """
+        out = []
+        for e in self.excludes + self.acknowledges:
+            probe = e.replace("**", "x").replace("*", "x")
+            for i in self.includes:
+                if i != "**" and fnmatch.fnmatch(probe, i):
+                    out.append((e, i))
+                    break
+        return out
 
     def exists(self) -> bool:
         return bool(self.excludes) or self.includes != ["**"]
@@ -185,53 +224,118 @@ def scope_or_default(md_path: str | Path = MD_FILE, log=None):
     return lambda path: not is_vendored(path)
 
 
-CHARTER_HEADER = """## Charter
-
-<!-- Owner knowledge the repository cannot express — plain sentences, consumed ONLY by
-     the feature-naming stages (never per-commit analysis, never assignment picks).
-     Statements that work:
-       - "<X> and <Y> are one feature"
-       - "<X> and <Y> are distinct features, never merge them"
-       - "UI windows/screens belong to the feature they serve"
-       - one or two lines describing what this project IS -->
-
-(describe the project here)
-"""
 
 
-def draft_charter(conn, md_path: str | Path = MD_FILE) -> str:
-    """Charter skeleton seeded from the census (generic — no docs, no repo assumptions):
-    related vocabulary groups are surfaced as commented questions the owner can turn into
-    rulings. Requires a census (init builds a touch-weighted one pre-untangle)."""
-    groups: dict[str, list[str]] = defaultdict(list)
-    for r in conn.execute("SELECT stem, n_concerns FROM stem_census WHERE is_god=0 "
-                          "ORDER BY n_concerns DESC LIMIT 400"):
-        groups[r["stem"].split()[0]].append(r["stem"])
-    questions = [(tok, v) for tok, v in groups.items() if len(v) >= 3][:15]
-    section = CHARTER_HEADER
-    if questions:
-        section += ("\n<!-- the census found related vocabulary that may need a ruling —\n"
-                    "     one sentence each turns a guess into a rule: -->\n")
-        for tok, variants in questions:
-            section += f"<!-- {tok}: {', '.join(variants[:5])} -->\n"
-    p = Path(md_path)
-    text = p.read_text(encoding="utf-8") if p.exists() else "# gitchronicle\n\n"
-    if "## Charter" in text:
-        text = re.sub(r"## Charter.*?(?=\n## |\Z)", section, text, flags=re.S)
-    else:
-        text = text.rstrip() + "\n\n" + section
-    p.write_text(text, encoding="utf-8")
-    return section
+class Direction:
+    """DIRECTION — the owner's standing instructions, kept typed rather than as prose.
 
+    The optional half of this tool's original ask: say up front what you are looking for,
+    and let the pipeline lean that way. A ``## Direction`` section in ``gitchronicle.md``;
+    absent, the pipeline runs exactly as it does today (auto mode) — silence must not
+    change behaviour.
 
-def load_charter(md_path: str | Path = MD_FILE) -> str:
-    """The ## Charter section body (owner taste, injected at label-space calls only)."""
-    p = Path(md_path)
-    if not p.exists():
-        return ""
-    m = re.search(r"## Charter\s*\n(.*?)(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
-    body = (m.group(1) if m else "").strip()
-    body = re.sub(r"<!--.*?-->", "", body, flags=re.S).strip()
-    if body == "(describe the project here)":   # untouched skeleton = no charter
-        return ""
-    return body[:2500]
+    v0.1 shipped a free-prose ``## Charter``, measured it as ineffective and removed it
+    (commit 8d0a8e3). Two things went wrong and both are addressed here. Prose sprayed
+    into every prompt is not a lever you can aim, so the statements are TYPED: a glossary
+    naming things the model cannot know, rules that constrain grain, and a voice for the
+    narration. And nobody could tell whether it had helped, so ``report()`` states exactly
+    what was active and where it was applied.
+
+    Be aware it is not free: direction text joins the prompt, which changes the cache key,
+    so turning it on or editing it re-pays the naming and chronicle passes.
+
+        ## Direction
+        - voice: Write for the person who built this, reading it years later.
+        - glossary: luna = the embedded Lua scripting bridge
+        - rule: Item prototypes, stats and bonuses are ONE system; never split them.
+    """
+
+    VERBS = ("voice", "glossary", "rule", "audience")
+
+    def __init__(self, voice="", audience="", glossary=None, rules=None):
+        self.voice = voice
+        self.audience = audience
+        self.glossary: list[str] = glossary or []
+        self.rules: list[str] = rules or []
+
+    @classmethod
+    def load(cls, md_path: str | Path = MD_FILE) -> "Direction":
+        p = Path(md_path)
+        if not p.exists():
+            return cls()
+        m = re.search(r"## Direction.*?(?=\n## |\Z)", p.read_text(encoding="utf-8"), re.S)
+        if not m:
+            return cls()
+        voice = audience = ""
+        gloss: list[str] = []
+        rules: list[str] = []
+        for ln in _uncommented(m.group(0)).splitlines():
+            ln = ln.strip()
+            mm = re.match(r"-\s*(voice|audience|glossary|rule)\s*:\s*(.+)", ln, re.I)
+            if not mm:
+                continue
+            verb, rest = mm.group(1).lower(), mm.group(2).strip()
+            if verb == "voice":
+                voice = rest
+            elif verb == "audience":
+                audience = rest
+            elif verb == "glossary":
+                gloss.append(rest)
+            else:
+                rules.append(rest)
+        return cls(voice, audience, gloss, rules)
+
+    def shadowed(self) -> list[tuple[str, str]]:
+        """Excludes an include already overrides — they read as filters and do nothing.
+
+        An explicit include wins by design, so it can carve a pocket of code back out of
+        an excluded tree; the cost is that a narrower exclude written under a broader
+        include is silently inert, which is a trap worth reporting.
+        """
+        out = []
+        for e in self.excludes + self.acknowledges:
+            probe = e.replace("**", "x").replace("*", "x")
+            for i in self.includes:
+                if i != "**" and fnmatch.fnmatch(probe, i):
+                    out.append((e, i))
+                    break
+        return out
+
+    def exists(self) -> bool:
+        return bool(self.voice or self.audience or self.glossary or self.rules)
+
+    def naming_prefix(self) -> str:
+        """Glossary and grain rules — what a namer cannot infer from paths alone."""
+        if not (self.glossary or self.rules):
+            return ""
+        out = []
+        if self.glossary:
+            out.append("This project's own vocabulary:\n"
+                       + "\n".join(f"- {g}" for g in self.glossary))
+        if self.rules:
+            out.append("The owner's standing rules:\n"
+                       + "\n".join(f"- {r}" for r in self.rules))
+        return "\n".join(out) + "\n"
+
+    def voice_suffix(self) -> str:
+        """Tone for the narration; never changes what the evidence says."""
+        bits = []
+        if self.audience:
+            bits.append(f"Audience: {self.audience}.")
+        if self.voice:
+            bits.append(self.voice)
+        return (" " + " ".join(bits)) if bits else ""
+
+    def key(self) -> str:
+        """Identity of this direction, so a change invalidates the prompts it touched."""
+        import hashlib
+        raw = "\x00".join([self.voice, self.audience, *self.glossary, *self.rules])
+        return hashlib.sha1(raw.encode()).hexdigest()[:10] if raw.strip("\x00") else ""
+
+    def report(self, log=print) -> None:
+        if not self.exists():
+            return
+        log(f"  direction: {len(self.glossary)} glossary, {len(self.rules)} rules"
+            + (", voice set" if self.voice else "")
+            + (f", audience '{self.audience}'" if self.audience else "")
+            + f"  [key {self.key()}]")

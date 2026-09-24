@@ -99,6 +99,21 @@ def territory_conflicts(conn) -> list[dict]:
     return out[:40]
 
 
+def temporal_violations(conn) -> list[dict]:
+    """Features holding commits older than their own birth (first git appearance of any
+    register-territory file). Should be empty — each one is a false attribution."""
+    out = []
+    for r in conn.execute("""
+            SELECT d.id, d.name, d.born_at, MIN(c.authored_at) earliest, COUNT(*) n
+            FROM domains d JOIN commit_domains cd ON cd.domain_id = d.id
+            JOIN commits c ON c.hash = cd.commit_hash
+            WHERE d.born_at IS NOT NULL AND d.status IN ('named','provisional','confirmed')
+            GROUP BY d.id HAVING substr(MIN(c.authored_at),1,10) < d.born_at"""):
+        out.append({"id": r["id"], "name": r["name"], "born": r["born_at"],
+                    "earliest_commit": (r["earliest"] or "")[:10], "commits": r["n"]})
+    return sorted(out, key=lambda x: x["earliest_commit"])
+
+
 def health(conn) -> dict:
     """The full health snapshot (also embedded in the inspect GUI)."""
     feats = conn.execute("SELECT id, name, status FROM domains "
@@ -140,6 +155,7 @@ def health(conn) -> dict:
         "orphan_stems": orphan_stems(conn),
         "near_dups": sorted(near_dups, key=lambda d: -d["cos"])[:20],
         "territory_conflicts": territory_conflicts(conn),
+        "temporal_violations": temporal_violations(conn),
     }
 
 
@@ -148,6 +164,10 @@ def print_health(conn, log=print) -> dict:
     log(f"features: {h['features']} {h['by_status']}; concerns {h['concerns']}, "
         f"unassigned {h['unassigned']}")
     log(f"sources: {h['sources']}; conf median {h['conf_median']} p10 {h['conf_p10']}")
+    tv = h["temporal_violations"]
+    log(f"temporal violations (commits older than the feature's code): {len(tv)}")
+    for v in tv[:6]:
+        log(f"  {v['name'][:44]}  born {v['born']} but earliest commit {v['earliest_commit']}")
     log(f"near-dup feature pairs (>=0.90): {len(h['near_dups'])}")
     for d in h["near_dups"][:6]:
         log(f"  {d['cos']:.2f}  {d['a']}  <->  {d['b']}")
