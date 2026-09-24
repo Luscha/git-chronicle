@@ -191,6 +191,71 @@ class Scope:
             return False
         return True
 
+    def verdict(self, glob: str) -> str:
+        """What the map says about a subtree, as the studio shows it: the rule that
+        actually decides, not the one written last."""
+        probe = glob.rstrip("*").rstrip("/") + "/probe"
+        if any(fnmatch.fnmatch(probe, g) for g in self.includes if g != "**"):
+            return "analysed"
+        if any(fnmatch.fnmatch(probe, g) for g in self.acknowledges):
+            return "one entry"
+        if any(fnmatch.fnmatch(probe, g) for g in self.excludes):
+            return "external"
+        return "analysed"
+
+    def set(self, glob: str, verdict: str, siblings: list[str] | None = None) -> None:
+        """Move a subtree between verdicts, in memory. ``save`` writes the file.
+
+        Excluding a subtree that an ANCESTOR include covers would do nothing, because an
+        explicit include wins — that is how 13,345 vendored files stayed in scope under a
+        drafted `include: Extern-Server/**`. So the ancestor include is lifted and the
+        subtree's siblings keep theirs, which leaves every other verdict unchanged.
+        """
+        for lst in (self.includes, self.excludes, self.acknowledges):
+            while glob in lst:
+                lst.remove(glob)
+        if verdict == "analysed":
+            self.includes.append(glob)
+        elif verdict in ("external", "one entry"):
+            probe = glob.rstrip("*").rstrip("/") + "/probe"
+            for anc in [g for g in self.includes
+                        if g != glob and g != "**" and fnmatch.fnmatch(probe, g)]:
+                self.includes.remove(anc)
+                for sib in siblings or []:
+                    if sib != glob and sib not in self.includes:
+                        self.includes.append(sib)
+            (self.excludes if verdict == "external" else self.acknowledges).append(glob)
+        else:
+            raise ValueError(f"unknown verdict {verdict!r}")
+
+    def render(self) -> str:
+        """The ## Scope section, verdicts first and the rule that decides on top.
+
+        Order matters and is not cosmetic: an explicit include beats an exclude, so a
+        reader has to be able to see which line wins.
+        """
+        out = ["## Scope", "",
+               "<!-- The pipeline analyses ONLY paths matching an `include:` glob and no",
+               "     `exclude:`/`acknowledge:` glob. An explicit include WINS over an",
+               "     exclude, so it can carve a pocket of your code out of a vendored tree.",
+               "     `acknowledge:` catalogues an owned sub-product as ONE entry without",
+               "     decomposing it. Edit here or in the studio's Scope view. -->", ""]
+        out += [f"- include: {g}" for g in self.includes if g != "**"]
+        out += [f"- exclude: {g}" for g in self.excludes]
+        out += [f"- acknowledge: {g}" for g in self.acknowledges]
+        return "\n".join(out) + "\n"
+
+    def save(self, md_path: str | Path = MD_FILE) -> None:
+        """Replace the ## Scope section, leaving every other section (Direction, notes)
+        exactly as it was — the file is the owner's, not the tool's."""
+        p = Path(md_path)
+        text = p.read_text(encoding="utf-8") if p.exists() else "# gitchronicle\n\n"
+        if re.search(r"## Scope.*?(?=\n## |\Z)", text, re.S):
+            text = re.sub(r"## Scope.*?(?=\n## |\Z)", self.render(), text, count=1, flags=re.S)
+        else:
+            text = text.rstrip() + "\n\n" + self.render()
+        p.write_text(text, encoding="utf-8")
+
     def shadowed(self) -> list[tuple[str, str]]:
         """Excludes an include already overrides — they read as filters and do nothing.
 
@@ -284,6 +349,71 @@ class Direction:
             else:
                 rules.append(rest)
         return cls(voice, audience, gloss, rules)
+
+    def verdict(self, glob: str) -> str:
+        """What the map says about a subtree, as the studio shows it: the rule that
+        actually decides, not the one written last."""
+        probe = glob.rstrip("*").rstrip("/") + "/probe"
+        if any(fnmatch.fnmatch(probe, g) for g in self.includes if g != "**"):
+            return "analysed"
+        if any(fnmatch.fnmatch(probe, g) for g in self.acknowledges):
+            return "one entry"
+        if any(fnmatch.fnmatch(probe, g) for g in self.excludes):
+            return "external"
+        return "analysed"
+
+    def set(self, glob: str, verdict: str, siblings: list[str] | None = None) -> None:
+        """Move a subtree between verdicts, in memory. ``save`` writes the file.
+
+        Excluding a subtree that an ANCESTOR include covers would do nothing, because an
+        explicit include wins — that is how 13,345 vendored files stayed in scope under a
+        drafted `include: Extern-Server/**`. So the ancestor include is lifted and the
+        subtree's siblings keep theirs, which leaves every other verdict unchanged.
+        """
+        for lst in (self.includes, self.excludes, self.acknowledges):
+            while glob in lst:
+                lst.remove(glob)
+        if verdict == "analysed":
+            self.includes.append(glob)
+        elif verdict in ("external", "one entry"):
+            probe = glob.rstrip("*").rstrip("/") + "/probe"
+            for anc in [g for g in self.includes
+                        if g != glob and g != "**" and fnmatch.fnmatch(probe, g)]:
+                self.includes.remove(anc)
+                for sib in siblings or []:
+                    if sib != glob and sib not in self.includes:
+                        self.includes.append(sib)
+            (self.excludes if verdict == "external" else self.acknowledges).append(glob)
+        else:
+            raise ValueError(f"unknown verdict {verdict!r}")
+
+    def render(self) -> str:
+        """The ## Scope section, verdicts first and the rule that decides on top.
+
+        Order matters and is not cosmetic: an explicit include beats an exclude, so a
+        reader has to be able to see which line wins.
+        """
+        out = ["## Scope", "",
+               "<!-- The pipeline analyses ONLY paths matching an `include:` glob and no",
+               "     `exclude:`/`acknowledge:` glob. An explicit include WINS over an",
+               "     exclude, so it can carve a pocket of your code out of a vendored tree.",
+               "     `acknowledge:` catalogues an owned sub-product as ONE entry without",
+               "     decomposing it. Edit here or in the studio's Scope view. -->", ""]
+        out += [f"- include: {g}" for g in self.includes if g != "**"]
+        out += [f"- exclude: {g}" for g in self.excludes]
+        out += [f"- acknowledge: {g}" for g in self.acknowledges]
+        return "\n".join(out) + "\n"
+
+    def save(self, md_path: str | Path = MD_FILE) -> None:
+        """Replace the ## Scope section, leaving every other section (Direction, notes)
+        exactly as it was — the file is the owner's, not the tool's."""
+        p = Path(md_path)
+        text = p.read_text(encoding="utf-8") if p.exists() else "# gitchronicle\n\n"
+        if re.search(r"## Scope.*?(?=\n## |\Z)", text, re.S):
+            text = re.sub(r"## Scope.*?(?=\n## |\Z)", self.render(), text, count=1, flags=re.S)
+        else:
+            text = text.rstrip() + "\n\n" + self.render()
+        p.write_text(text, encoding="utf-8")
 
     def shadowed(self) -> list[tuple[str, str]]:
         """Excludes an include already overrides — they read as filters and do nothing.

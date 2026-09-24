@@ -61,6 +61,7 @@ _HEADER = """\
 #   merge      "<from>" -> "<to>"
 #   reject     "<name>"     tombstone: never proposed again
 #   keep-split <glob>       this directory is MEANT to span several entries — stop asking
+#   ignore     <word>       this word runs through the work but names nothing — stop asking
 """
 
 
@@ -96,13 +97,18 @@ class Entry:
 class Ledger:
     """Parsed curation. ``entries`` keeps file order, which is also precedence order."""
 
-    def __init__(self, entries=None, merges=None, tombstones=None, keep_splits=None):
+    def __init__(self, entries=None, merges=None, tombstones=None, keep_splits=None,
+                 ignored=None):
         self.entries: list[Entry] = entries or []
         self.merges: list[tuple[str, str]] = merges or []
         self.tombstones: list[str] = tombstones or []
         # "these files SHOULD belong to different entries" — a judgement as real as a
         # claim, and the only one the studio previously threw away on every restart
         self.keep_splits: list[str] = keep_splits or []
+        # words the owner has looked at and judged to name nothing — the review queue's
+        # equivalent of keep-split, and just as necessary: without it the same question
+        # comes back on every run
+        self.ignored: list[str] = ignored or []
 
     # -- parsing ----------------------------------------------------------
     @classmethod
@@ -118,6 +124,7 @@ class Ledger:
         merges: list[tuple[str, str]] = []
         tombs: list[str] = []
         keeps: list[str] = []
+        ignored: list[str] = []
         by_name: dict[str, Entry] = {}
         cur: Entry | None = None
 
@@ -144,6 +151,9 @@ class Ledger:
                 cur = None
             elif verb == "keep-split":
                 keeps.append(rest)
+                cur = None
+            elif verb == "ignore":
+                ignored.append(rest.strip().strip('"').lower())
                 cur = None
             elif verb == "reject" and _is_quoted(rest):
                 # `reject "Name"` tombstones an entry; `reject <glob>` carves paths out of
@@ -173,7 +183,7 @@ class Ledger:
             else:
                 raise LedgerError(f"line {lineno}: unknown verb '{verb}'")
 
-        return cls(entries, merges, tombs, keeps)
+        return cls(entries, merges, tombs, keeps, ignored)
 
     # -- replay -----------------------------------------------------------
     def owner(self, path: str) -> str | None:
@@ -271,7 +281,8 @@ class Ledger:
         return any(fnmatch.fnmatch(path, g) for g in self.keep_splits)
 
     def exists(self) -> bool:
-        return bool(self.entries or self.merges or self.tombstones or self.keep_splits)
+        return bool(self.entries or self.merges or self.tombstones or self.keep_splits
+                    or self.ignored)
 
     # -- writing ----------------------------------------------------------
     def render(self) -> str:
@@ -291,6 +302,7 @@ class Ledger:
         out += [f'merge      "{s}" -> "{d}"' for s, d in self.merges]
         out += [f'reject     "{n}"' for n in self.tombstones]
         out += [f"keep-split {g}" for g in self.keep_splits]
+        out += [f"ignore     {w}" for w in self.ignored]
         return "\n".join(out).rstrip() + "\n"
 
     def save(self, path: str | Path = PLAN_FILE) -> None:
