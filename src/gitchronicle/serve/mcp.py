@@ -43,6 +43,14 @@ TOOLS = [
          "path": {"type": "string", "description": "Repo-relative file or folder path"},
          "limit": {"type": "integer", "description": "Max commits (default 25)"}},
          "required": ["path"]}},
+    {"name": "inspect",
+     "description": "Everything known about one file, or about every file whose path carries a "
+                    "word: which entry owns each, what work they were part of, what changes with "
+                    "them, and — when several match — which of them are the framework and which "
+                    "only use it. Ask before moving code, or when a feature seems to be missing.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "A repo-relative path, a filename, or a word"}},
+         "required": ["query"]}},
     {"name": "period",
      "description": "What happened in the project during a year or date range: most active "
                     "entries with their chapter titles, entries first seen, entries removed.",
@@ -54,8 +62,12 @@ TOOLS = [
 
 
 class KB:
-    def __init__(self, path: str):
+    def __init__(self, path: str, repo: str = "", scope_path: str = ""):
         self.path = path
+        self.repo = repo
+        # an agent starts this from wherever it likes, so the scope map is found next to
+        # the config rather than in the current directory
+        self.scope_path = scope_path or "gitchronicle.md"
         self.index = Index(path)
 
     def db(self) -> sqlite3.Connection:
@@ -132,6 +144,44 @@ class KB:
             lines.append("(not narrated yet)")
         return "\n".join(lines)
 
+    def inspect(self, query: str) -> str:
+        from ..scope import Scope
+        from .inspect import file_card, find, split_hint
+        with self.db() as c:
+            sc = Scope.load(self.scope_path)
+            found = find(c, query, scope=sc)
+            if not found["files"]:
+                return f"Nothing in the repository matches {query!r}."
+            if len(found["files"]) == 1 or query.strip("/") in found["files"]:
+                card = file_card(c, found["files"][0], self.repo)
+                e = card["entry"]
+                out = [f"# {card['path']}",
+                       f"owned by: {e['name'] + ' [' + (e['tier'] or '') + ']' if e else 'no entry'}"]
+                if card["chapters"]:
+                    out.append("told in: " + "; ".join(f"{x['title']} ({x['start'][:7]})"
+                                                       for x in card["chapters"][:4]))
+                if card["concerns"]:
+                    out.append("\nbuilt for:")
+                    out += [f"  {x['date']} {x['label']}"
+                            + (f"  -> {x['entry']}" if x["entry"] else "") for x in card["concerns"][:10]]
+                if card["cochanged"]:
+                    out.append("\nchanges with:")
+                    out += [f"  {x['n']}x {x['path']}" + (f" ({x['entry']})" if x["entry"] else "")
+                            for x in card["cochanged"][:8]]
+                return "\n".join(out)
+            out = [f"{found['total']} files carry {query!r}, owned as follows:"]
+            for g in found["entries"]:
+                out.append(f"\n{g['name'] or '(no entry)'} — {g['n']} file(s)")
+                out += [f"  {f}" for f in g["files"][:8]]
+            hint = split_hint(c, self.repo, query, scope=sc) if self.repo else {"core": [], "clients": []}
+            if hint["core"] and hint["clients"]:
+                out.append("\nBy their includes, these look like the framework:")
+                out += [f"  {x['path']}" + (f" (included by {x['included_by']})" if x["included_by"] else "")
+                        for x in hint["core"][:8]]
+                out.append(f"and these {len(hint['clients'])} use it:")
+                out += [f"  {f}" for f in hint["clients"][:8]]
+            return "\n".join(out)
+
     def path_history(self, path: str, limit: int = 25) -> str:
         p = path.strip().strip("/")
         with self.db() as c:
@@ -200,8 +250,9 @@ def _plain(html: str) -> str:
     return (html or "").replace("<mark>", "").replace("</mark>", "")
 
 
-def serve_mcp(kb_path: str, stdin=None, stdout=None) -> None:
-    kb = KB(kb_path)
+def serve_mcp(kb_path: str, stdin=None, stdout=None, repo: str = "",
+              scope_path: str = "") -> None:
+    kb = KB(kb_path, repo, scope_path)
     rd, wr = stdin or sys.stdin, stdout or sys.stdout
 
     def reply(mid, result=None, error=None):

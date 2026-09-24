@@ -316,7 +316,7 @@ def studio_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     # the KB, not the working DB: the studio reads what `update` emits
     serve_studio(db or cfg.get("output", {}).get("kb", cfg["db"]["path"]),
                  log=_log, port=port, provider_factory=provider_factory,
-                 title=Path(cfg["repo"]["path"]).name,
+                 title=Path(cfg["repo"]["path"]).name, repo=cfg["repo"]["path"],
                  rebuild_argv=[sys.executable, "-m", "gitchronicle", "update",
                                "--config", config])
 
@@ -340,7 +340,62 @@ def mcp_cmd(config: str = _Config,
     if not Path(kb).exists():
         sys.stderr.write(f"gitchronicle mcp: no knowledge base at {kb} — run `gitchronicle update`\n")
         raise typer.Exit(1)
-    serve_mcp(kb)
+    serve_mcp(kb, repo=cfg["repo"]["path"],
+              scope_path=str(Path(config).resolve().parent / "gitchronicle.md"))
+
+
+@app.command(name="inspect")
+def inspect_cmd(query: str = typer.Argument(..., help="A path, a filename, or a word"),
+                config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+                plain: bool = typer.Option(False, "--files", help="Just the paths, one per line")):
+    """Who owns these files, what they were built for, and what belongs with them."""
+    from .scope import Scope
+    from .serve.inspect import file_card, find, split_hint
+    cfg, _ = _setup(config, repo, rev, db)
+    kb = cfg.get("output", {}).get("kb", cfg["db"]["path"])
+    if not Path(kb).exists():
+        console.print(f"[yellow]No knowledge base at {kb} — run `gitchronicle update`.[/]")
+        raise typer.Exit(1)
+    conn, repo_path, sc = connect(kb), cfg["repo"]["path"], Scope.load()
+    found = find(conn, query, scope=sc)
+    if plain:
+        for f in found["files"]:
+            console.print(f, markup=False, highlight=False)
+        return
+    if not found["files"]:
+        console.print(f"[yellow]nothing matches {query!r}[/]")
+        raise typer.Exit(1)
+    if len(found["files"]) == 1 or "/" in query:
+        card = file_card(conn, found["files"][0], repo_path)
+        _head(card["path"])
+        e = card["entry"]
+        _log(f"  owned by: {e['name'] + ' [' + (e['tier'] or '') + ']' if e else '(no entry)'}")
+        if card["chapters"]:
+            _log("  told in: " + "; ".join(f"{c['title']} ({c['start'][:7]})" for c in card["chapters"][:4]))
+        if card["concerns"]:
+            _log("  built for:")
+            for c in card["concerns"][:8]:
+                _log(f"    {c['date']}  {c['label']}" + (f"   → {c['entry']}" if c["entry"] else ""))
+        if card["cochanged"]:
+            _log("  changes with:")
+            for c in card["cochanged"][:6]:
+                _log(f"    {c['n']:3}x  {c['path']}" + (f"   ({c['entry']})" if c["entry"] else ""))
+        return
+    _head(f"{found['total']} files match {query!r}")
+    for grp in found["entries"]:
+        _log(f"  {grp['n']:3}  {grp['name'] or '(no entry)'}")
+        for f in grp["files"][:6]:
+            _log(f"         {f}")
+    hint = split_hint(conn, repo_path, query, scope=sc)
+    if hint["core"] and hint["clients"]:
+        _head("Framework, or its users?")
+        _log("  these are included by the others — the framework:")
+        for x in hint["core"][:8]:
+            _log(f"    {x['path']}" + (f"   (included by {x['included_by']})" if x["included_by"] else ""))
+        _log(f"  these {len(hint['clients'])} include it — its users:")
+        for f in hint["clients"][:8]:
+            _log(f"    {f}")
+        _log("  claim the first group as one entry; the second belongs to whatever uses it.")
 
 
 @app.command(name="doctor")
