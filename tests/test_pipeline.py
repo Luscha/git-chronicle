@@ -152,3 +152,36 @@ def test_acknowledged_subtree_is_not_analysed(tmp_path, monkeypatch):
     sc = Scope.load()
     assert sc.verdict("tools/vendor/**") == "one entry"
     assert sc("tools/vendor/thing.py") is False
+
+
+def test_a_stated_relation_becomes_an_edge(config, provider, monkeypatch, tmp_path):
+    """Imports show code calling code. Content rendered by a framework references nothing
+    an extractor can read, so the owner's statement is the only evidence there is."""
+    from gitchronicle.taxonomy.ledger import Ledger
+    from gitchronicle.taxonomy.relations import build_relations
+    plan = ('entry "Reactor"\n  claim src/reactor/**\nentry "Dashboard"\n'
+            '  claim src/dashboard/**\n  uses   "Reactor"\n')
+    conn, kb = build(config, provider, monkeypatch, tmp_path, plan=plan)
+    from gitchronicle.storage import connect
+    out = connect(config["output"]["kb"])
+    build_relations(out, config["repo"]["path"], log=lambda *_: None, ledger=Ledger.load())
+    out.commit()
+    edges = {(r[0], r[1], r[2]) for r in out.execute(
+        "SELECT s.name, t.name, e.why FROM domain_edges e JOIN domains s ON s.id=e.src_domain "
+        "JOIN domains t ON t.id=e.dst_domain")}
+    assert any(s == "Dashboard" and d == "Reactor" for s, d, _ in edges)
+    assert any("stated" in (why or "") for s, d, why in edges if s == "Dashboard")
+
+
+def test_a_stated_relation_to_an_unknown_entry_is_reported_not_silent(config, provider,
+                                                                     monkeypatch, tmp_path):
+    from gitchronicle.taxonomy.ledger import Ledger
+    from gitchronicle.taxonomy.relations import build_relations
+    plan = 'entry "Reactor"\n  claim src/reactor/**\n  uses   "Nonexistent System"\n'
+    conn, kb = build(config, provider, monkeypatch, tmp_path, plan=plan)
+    from gitchronicle.storage import connect
+    out = connect(config["output"]["kb"])
+    said = []
+    build_relations(out, config["repo"]["path"], log=lambda m="": said.append(str(m)),
+                    ledger=Ledger.load())
+    assert any("Nonexistent System" in m for m in said)
