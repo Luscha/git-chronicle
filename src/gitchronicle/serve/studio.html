@@ -300,6 +300,40 @@ textarea.plan { width:100%; min-height:46vh; background:var(--panel); border:1px
   padding:14px 16px; font-family:var(--mono); font-size:12.5px; line-height:1.6; outline:none; resize:vertical }
 textarea.plan:focus { border-color:var(--acc) }
 
+/* ---------- files / inspector ---------- */
+.fgroup { margin:14px 0 4px; display:flex; align-items:center; gap:8px; font-size:12.5px }
+.fgroup b { font-weight:600 } .fgroup .tag { margin-left:2px }
+.frow { display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; font-family:var(--mono); font-size:12px }
+.frow:hover { background:var(--sunken) }
+.frow.sel { background:var(--acc-soft) }
+.frow .ck { accent-color:var(--acc); cursor:pointer; flex:none }
+.frow .p { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; flex:1 }
+.frow .why { font-family:var(--sans); font-size:11.5px; color:var(--faint); flex:none }
+.bucket { border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin:8px 0 }
+.bucket h4 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600 }
+.bucket p { font-size:12.5px; color:var(--muted); margin:2px 0 8px }
+.fcard { position:sticky; top:16px }
+.fcard h3 { font-family:var(--mono); font-size:13px; font-weight:500; word-break:break-all }
+.fcard .sec { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint);
+  font-weight:600; margin:14px 0 4px }
+.fcard .it { font-size:12.5px; color:var(--fg-2); padding:2px 0 }
+.fcard .it span { color:var(--faint) }
+
+/* ---------- scope ---------- */
+.scope { width:100%; border-collapse:separate; border-spacing:0 }
+.scope th { text-align:left; font-size:11.5px; font-weight:600; color:var(--faint); padding:8px 12px;
+  text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--line) }
+.scope td { padding:7px 12px; border-bottom:1px solid var(--line-2); vertical-align:middle }
+.scope tr.child td:first-child { padding-left:34px }
+.scope tr.ext td { opacity:.55 }
+.scope .seg button { padding:3px 9px; font-size:12px }
+.scope .path { font-family:var(--mono); font-size:12.5px }
+.scope .n { font-variant-numeric:tabular-nums; color:var(--muted); font-size:12.5px; text-align:right }
+.vocab .w { font-size:15px; font-weight:650; letter-spacing:-.01em }
+.vocab .labels { display:grid; gap:2px; margin:8px 0 10px }
+.vocab .labels div { font-size:12.5px; color:var(--fg-2) }
+.vocab .dirs { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-bottom:10px }
+
 /* ---------- dock ---------- */
 #dock { position:fixed; left:calc((100vw + 232px) / 2); transform:translateX(-50%); bottom:20px; z-index:40; white-space:nowrap;
   background:var(--btn); color:var(--btn-fg); border-radius:12px; padding:8px 8px 8px 16px; display:none;
@@ -333,10 +367,12 @@ body.dopen #dock, body.dopen #pvpop { left:calc((100vw - min(600px,100vw) + 232p
     <div class="navh">Explore</div>
     <div class="navi" data-v="ask"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Ask</div>
     <div class="navi" data-v="catalogue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Catalogue<span class="count" id="nCat"></span></div>
+    <div class="navi" data-v="files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="11" cy="14" r="3"/><path d="m16 19-2.5-2.5"/></svg>Files</div>
     <div class="navi" data-v="graph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>Graph</div>
     <div class="navi" data-v="timeline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h9M7 12h12M5 18h8"/></svg>Timeline</div>
     <div class="navh">Curate</div>
     <div class="navi" data-v="review"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Review<span class="count" id="nRev"></span></div>
+    <div class="navi" data-v="scope"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2"/></svg>Scope<span class="count" id="nScope"></span></div>
     <div class="navi" data-v="rules"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>Rules<span class="count" id="nRul"></span></div>
     <div class="sidefoot" id="foot"></div>
   </aside>
@@ -465,9 +501,11 @@ function index() {
   const dl = $("entrynames"); dl.textContent = "";
   for (const n of [...byName.keys()].sort((a, b) => a.localeCompare(b))) dl.append(new Option(n));
   $("nCat").textContent = S.catalogue.length;
-  const open = (S.trees || []).filter(t => !t.handled).length;
-  $("nRev").textContent = open || "";
   $("nRul").textContent = parsePlan(planText).length || "";
+  // the queue is both halves: folders split apart, and words nothing answers to
+  const open = (S.trees || []).filter(t => !t.handled).length
+             + (S.vocab || []).filter(v => !ignoredWords().includes(v.word)).length;
+  $("nRev").textContent = open || "";
 }
 
 // ---------- routing: #view or #view/Entry Name -----------------------------------------
@@ -1489,7 +1527,16 @@ function renderReview(main) {
     h("p", null, "Folders the catalogue split across several entries, most suspicious first: no entry owns most of it, "
       + "and nothing is named after it. If the files are one thing you built, make them one entry; if they are different "
       + "things that share a folder, mark it as correctly split."))));
-  if (!open.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  const vocab = (S.vocab || []).filter(v => !ignoredWords().includes(v.word));
+  if (!open.length && !vocab.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  if (vocab.length) {
+    page.append(h("div", { class: "rgroup" }, "Words that run through the work and name no entry"));
+    page.append(h("div", { class: "hint", style: "margin:-2px 0 10px" },
+      "Work the assembly could not place. A word here is either a thing nobody named yet, or "
+      + "a scope rule that is not taking effect."));
+    for (const v of vocab.slice(0, 8)) page.append(vocabCard(v));
+    page.append(h("div", { class: "rgroup" }, "Folders split across several entries"));
+  }
   for (const t of open.slice(0, 40)) page.append(reviewCard(t));
   if (done.length) page.append(h("details", { style: "margin-top:20px" },
     h("summary", { class: "muted", style: "cursor:pointer" }, done.length + " folders already answered by a rule"),
@@ -1497,6 +1544,64 @@ function renderReview(main) {
       h("div", { class: "body" }, h("span", { class: "mono" }, t.dir), h("span", { class: "muted" }, "  →  " + t.handled)))))));
   main.append(page);
 }
+function ignoredWords() {
+  return (planText.match(/^ignore\s+(\S+)/gm) || []).map(l => l.split(/\s+/)[1].toLowerCase());
+}
+
+function vocabCard(v) {
+  const c = h("div", { class: "card rv vocab" });
+  const acts = h("div", { class: "acts" });
+  c.append(h("div", { class: "w" }, v.word),
+    h("div", { class: "facts" }, h("span", null, fmt(v.concerns) + " pieces of work mention it"),
+      h("span", null, "no entry answers to it")),
+    h("div", { class: "labels" }, v.labels.map(l => h("div", null, "· " + l))),
+    h("div", { class: "dirs" }, v.dirs.map(d => d.dir + " (" + d.n + ")").join("   ")));
+  if (v.inert_rule) {
+    c.append(h("div", { class: "explain" },
+      "Your scope says ", h("b", null, "exclude " + v.inert_rule), ", but an include overrides it, so "
+      + "this tree is still analysed and its words compete with yours. Fix it in Scope — nothing here "
+      + "is a missing feature."));
+    acts.append(h("button", { class: "btn pri", onclick: () => go("scope") }, "Open Scope →"));
+  } else if (v.globs.length) {
+    acts.append(h("button", { class: "btn pri", onclick: () => claimVocab(c, v) }, "Make it an entry…"));
+  } else {
+    c.append(h("div", { class: "explain" },
+      "Its files share no folder of their own, so there is no path rule to write. Ask what this work "
+      + "was, then decide: it may belong inside an entry you already have."));
+    acts.append(h("button", { class: "btn pri", onclick: () => {
+      askState.q = "what is the " + v.word + " work about?"; go("ask");
+      setTimeout(() => doAsk(askState.q), 50);
+    } }, "Ask about it"));
+  }
+  acts.append(h("button", { class: "btn", onclick: async () => {
+    addLine("ignore     " + v.word); await afterEdit();
+    c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ names nothing"));
+  } }, "Names nothing"));
+  c.append(acts);
+  return c;
+}
+
+function claimVocab(card, v) {
+  const acts = card.querySelector(".acts");
+  const name = h("input", { class: "field", list: "entrynames", style: "min-width:240px",
+                            value: v.word.charAt(0).toUpperCase() + v.word.slice(1) + " System" });
+  const tier = h("select", { class: "field" }, SETTABLE.map(t => new Option(TIER_LABEL[t], t)));
+  tier.value = "feature";
+  const hint = h("div", { class: "hint", style: "width:100%" });
+  const judge = () => { const j = judgeName(name.value); hint.className = "hint " + j.cls; hint.textContent = j.text; };
+  name.addEventListener("input", judge);
+  acts.replaceChildren(h("span", { class: "muted" }, "Claims " + v.globs.join(", ")), name, tier,
+    h("button", { class: "btn pri", onclick: async () => {
+      const n = name.value.trim(); if (!n) return;
+      addToEntry(n, v.globs.map(g => "  claim  " + g).concat(["  tier   " + tier.value]));
+      await afterEdit();
+      card.classList.add("done");
+      acts.replaceChildren(h("span", { class: "tag ok" }, "✓ claimed by " + n));
+    } }, "Add rule"),
+    h("button", { class: "btn ghost", onclick: () => renderReview() }, "Cancel"), hint);
+  judge(); name.focus(); name.select();
+}
+
 function reviewCard(t) {
   const c = h("div", { class: "card rv" });
   const acts = h("div", { class: "acts" });
@@ -1529,6 +1634,270 @@ function reviewCard(t) {
   }
   reset();
   return c;
+}
+
+// =========================================================================================
+// FILES — the inspector, and where a misfiled feature gets corrected
+// =========================================================================================
+// Both review queues look for work that is UNFILED. A framework whose files were scattered
+// across seven entries is misfiled, which neither queue can see — and correcting it meant
+// opening seven panels. Here the unit is the file, wherever it lives.
+let fileQ = "", fileHits = null, filePicked = new Set(), fileFocus = null, fileCard = null;
+
+async function renderFiles(main) {
+  const page = h("div", { class: "page", style: "max-width:1280px" });
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Files"),
+    h("p", null, "Search a path, a filename or a word. Every match, whoever owns it — pick the ones "
+      + "that are one thing and give them an entry. Their commits and stories follow."))));
+  const inp = h("input", { class: "field", placeholder: "traits, char_traits.cpp, Server/game/src/…",
+                           value: fileQ, style: "width:100%" });
+  let t = null;
+  inp.addEventListener("input", () => { fileQ = inp.value; clearTimeout(t); t = setTimeout(runFiles, 220); });
+  page.append(h("div", { class: "toolbar" }, h("div", { class: "search", style: "flex:1;max-width:520px" },
+    icon("search"), inp)));
+  const cols = h("div", { style: "display:grid;grid-template-columns:1.4fr 1fr;gap:22px;align-items:start" });
+  const left = h("div", { id: "fleft" }), right = h("div", { id: "fright" });
+  cols.append(left, right); page.append(cols); main.append(page);
+  drawFiles();
+  setTimeout(() => inp.focus(), 0);
+  if (fileQ && !fileHits) runFiles();
+}
+
+async function runFiles() {
+  if (!fileQ.trim()) { fileHits = null; drawFiles(); return; }
+  const q = fileQ;
+  const r = await (await fetch("/api/inspect?q=" + encodeURIComponent(q))).json();
+  if (q !== fileQ) return;
+  fileHits = r; drawFiles();
+}
+
+function fileRow(path, why) {
+  const cb = h("input", { type: "checkbox", class: "ck", checked: filePicked.has(path) });
+  cb.addEventListener("change", () => {
+    cb.checked ? filePicked.add(path) : filePicked.delete(path);
+    // in place: redrawing the list would detach every other checkbox mid-selection
+    row.classList.toggle("sel", cb.checked);
+    drawRight();
+  });
+  const row = h("div", { class: "frow" + (filePicked.has(path) ? " sel" : "") }, cb,
+    h("span", { class: "p", title: path, onclick: () => { fileFocus = path; fileCard = null; drawRight(); loadCard(path); } }, path),
+    why ? h("span", { class: "why" }, why) : null);
+  return row;
+}
+
+function drawRight() {
+  const right = $("fright");
+  if (!right) return;
+  right.replaceChildren();
+  if (filePicked.size) right.append(assignBox());
+  if (fileFocus) right.append(cardBox());
+  if (!filePicked.size && !fileFocus)
+    right.append(h("div", { class: "card pad hint" },
+      "Click a path to see what it was built for, what it changes with and which story tells it. "
+      + "Tick the ones that belong together to give them an entry."));
+}
+
+function drawFiles() {
+  const left = $("fleft"), right = $("fright");
+  if (!left) return;
+  left.replaceChildren(); right.replaceChildren();
+  if (!fileHits) {
+    left.append(h("div", { class: "empty" }, fileQ ? "Searching…"
+      : "Nothing searched yet. Try a word that names a thing you built."));
+    return;
+  }
+  if (!fileHits.files.length) { left.append(h("div", { class: "empty" }, "No file matches.")); return; }
+
+  left.append(h("div", { class: "hint" }, fmt(fileHits.total) + " files match · "
+    + fileHits.entries.length + " owner" + (fileHits.entries.length === 1 ? "" : "s")));
+
+  const hint = fileHits.hint;
+  if (hint && hint.core.length && hint.clients.length) {
+    // the include graph separates a framework from the code that uses it; the reading is
+    // evidence, never a verdict — which of the two you want is the judgement
+    const core = h("div", { class: "bucket" }, h("h4", null, "Looks like the framework"),
+      h("p", null, "the others include these"),
+      hint.core.map(x => fileRow(x.path, x.included_by ? "included by " + x.included_by : "")));
+    const cl = h("div", { class: "bucket" }, h("h4", null, "Looks like its users · " + hint.clients.length),
+      h("p", null, "these include the files above, so they usually belong to whatever feature uses them"),
+      hint.clients.map(x => fileRow(x, "")));
+    const pick = h("button", { class: "btn", onclick: () => {
+      hint.core.forEach(x => filePicked.add(x.path)); drawFiles(); } }, "Select the framework");
+    left.append(h("div", { class: "acts", style: "margin:10px 0" }, pick), core, cl);
+    if (hint.rest.length) left.append(h("div", { class: "bucket" },
+      h("h4", null, "Neither · " + hint.rest.length), h("p", null, "no include either way"),
+      hint.rest.map(x => fileRow(x, ""))));
+  } else {
+    for (const g of fileHits.entries) {
+      left.append(h("div", { class: "fgroup" }, dotEl(g.tier),
+        h("b", null, g.name || "no entry"), h("span", { class: "muted" }, g.n + " file" + (g.n === 1 ? "" : "s")),
+        g.name ? h("a", { style: "margin-left:auto", onclick: () => openEntry(g.name) }, "open entry →") : null));
+      g.files.forEach(f => left.append(fileRow(f, "")));
+    }
+  }
+
+  drawRight();
+}
+
+function assignBox() {
+  const picked = [...filePicked];
+  const name = h("input", { class: "field", list: "entrynames", placeholder: "Entry name — existing or new" });
+  const tier = h("select", { class: "field" }, SETTABLE.map(t => new Option(TIER_LABEL[t], t)));
+  tier.value = "framework";
+  const hint = h("div", { class: "hint" });
+  name.addEventListener("input", () => { const j = judgeName(name.value); hint.className = "hint " + j.cls;
+    hint.textContent = j.text; if (j.tier) tier.value = j.tier; });
+  const go = h("button", { class: "btn pri", onclick: async () => {
+    const v = name.value.trim();
+    if (!v) { hint.className = "hint err"; hint.textContent = "Name the entry these belong to."; return; }
+    await assignFiles(picked, v, byName.has(v) || pendingNames().includes(v) ? null : tier.value);
+  } }, "Assign " + picked.length + " file" + (picked.length === 1 ? "" : "s"));
+  return h("div", { class: "card pad" }, h("b", null, picked.length + " selected"),
+    h("div", { class: "hint", style: "margin:4px 0 10px" }, "They leave whatever entry holds them today; "
+      + "their commits and chapters follow on the next rebuild."),
+    h("div", { class: "acts" }, name, tier, go,
+      h("button", { class: "btn ghost", onclick: () => { filePicked.clear(); drawFiles(); } }, "Clear")), hint);
+}
+
+async function assignFiles(paths, to, newTier) {
+  // one rule per source entry, so each release is scoped to the entry that holds it
+  const bySource = new Map();
+  for (const p of paths) {
+    const owner = (fileHits.entries.find(g => g.files.includes(p)) || {}).name || null;
+    if (!bySource.has(owner)) bySource.set(owner, []);
+    bySource.get(owner).push(p);
+  }
+  const claims = [];
+  for (const [owner, fs] of bySource) {
+    if (owner && owner !== to) addToEntry(owner, fs.map(f => "  reject " + f));
+    for (const f of fs) claims.push("  claim  " + f + (owner && owner !== to ? ' from "' + owner + '"' : ""));
+  }
+  addToEntry(to, claims.concat(newTier ? ["  tier   " + newTier] : []));
+  filePicked.clear();
+  await afterEdit();
+  drawFiles();
+  toast("Assigned " + paths.length + " files to " + to + " — save to apply");
+}
+
+async function loadCard(path) {
+  const r = await (await fetch("/api/inspect?file=" + encodeURIComponent(path))).json();
+  if (fileFocus !== path) return;
+  fileCard = r; drawRight();
+}
+
+function cardBox() {
+  const c = fileCard;
+  if (!c) return h("div", { class: "card pad hint" }, "Reading…");
+  const box = h("div", { class: "card pad fcard" },
+    h("h3", null, c.path),
+    h("div", { class: "hint" }, c.entry
+      ? ["owned by ", h("a", { onclick: () => openEntry(c.entry.name) }, c.entry.name), " · " + c.entry.tier]
+      : "owned by no entry"));
+  if (c.chapters && c.chapters.length) {
+    box.append(h("div", { class: "sec" }, "told in"));
+    c.chapters.slice(0, 4).forEach(x => box.append(h("div", { class: "it" }, x.title,
+      h("span", null, "  " + x.start.slice(0, 7)))));
+  }
+  if (c.concerns.length) {
+    box.append(h("div", { class: "sec" }, "built for"));
+    c.concerns.slice(0, 8).forEach(x => box.append(h("div", { class: "it" },
+      h("span", null, x.date + "  "), x.label, x.entry ? h("span", null, "  → " + x.entry) : null)));
+  }
+  if (c.cochanged.length) {
+    box.append(h("div", { class: "sec" }, "changes with"));
+    c.cochanged.forEach(x => box.append(h("div", { class: "it" }, h("span", null, x.n + "×  "),
+      h("a", { onclick: () => { fileFocus = x.path; fileCard = null; drawRight(); loadCard(x.path); } }, x.path),
+      x.entry ? h("span", null, "  (" + x.entry + ")") : null)));
+  }
+  return box;
+}
+
+// =========================================================================================
+// SCOPE — what is the product, and what is somebody else's code
+// =========================================================================================
+// The map decides what the pipeline may look at, and it was the one input with no UI: a
+// vendored tree left in scope put 2,897 of 17,720 concerns on Boost headers and cost the
+// catalogue a whole framework, because "traits" then looked like someone else's word.
+let scopeRows = null, scopeEdits = new Map(), scopeShadow = [];
+
+async function loadScope() {
+  const r = await (await fetch("/api/scope")).json();
+  scopeRows = r.rows; scopeShadow = r.shadowed || [];
+  S.scopePath = r.path;
+}
+
+async function renderScope(main) {
+  const page = h("div", { class: "page", style: "max-width:1100px" });
+  page.append(h("div", { class: "ph" }, h("div", { class: "grow" }, h("h1", null, "Scope"),
+    h("p", null, "Which paths are the product. Everything analysed feeds the catalogue — and its "
+      + "vocabulary: a vendored tree left in means its words look like yours, and a feature named "
+      + "after one of them never forms. Marked ", h("b", null, "external"), ", a tree disappears "
+      + "from the analysis and its evidence is dropped on the next rebuild."))));
+  main.append(page);
+  if (!scopeRows) { page.append(h("div", { class: "empty" }, "Reading the repository…")); await loadScope(); page.lastChild.remove(); }
+
+  if (scopeShadow.length) {
+    const box = h("div", { class: "card pad", style: "border-color:var(--warn);margin-bottom:16px" },
+      h("b", null, scopeShadow.length + " rule" + (scopeShadow.length > 1 ? "s do" : " does") + " nothing"),
+      h("div", { class: "hint" }, "An explicit include wins over an exclude, so these exclusions never "
+        + "take effect. Setting the tree to External here lifts the include that shadows it and leaves "
+        + "its siblings analysed."));
+    for (const [exc, inc] of scopeShadow.slice(0, 6))
+      box.append(h("div", { class: "mono", style: "font-size:12px;margin-top:6px" },
+        "exclude " + exc, h("span", { class: "muted" }, "  overridden by  "), "include " + inc));
+    page.append(box);
+  }
+
+  const box = h("div", { class: "card" }); page.append(box);
+  const draw = () => {
+    const tb = h("table", { class: "scope" });
+    tb.append(h("tr", null, ["path", "files", "concerns", "in the catalogue", "verdict"].map((t, i) =>
+      h("th", { style: i && i < 4 ? "text-align:right" : "" }, t))));
+    const shown = scopeRows.filter(r => r.depth === 0 || openDirs.has("scope::" + r.dir.split("/")[0]));
+    for (const r of shown) {
+      const verdict = scopeEdits.get(r.glob) || r.verdict;
+      const kids = scopeRows.some(x => x.depth === 1 && x.dir.startsWith(r.dir + "/"));
+      const tr = h("tr", { class: (r.depth ? "child " : "") + (verdict === "external" ? "ext" : "") },
+        h("td", null, h("span", { class: "path", style: kids ? "cursor:pointer" : "", onclick: () => {
+          if (!kids) return;
+          const k = "scope::" + r.dir;
+          openDirs.has(k) ? openDirs.delete(k) : openDirs.add(k);
+          render();
+        } }, (kids ? (openDirs.has("scope::" + r.dir) ? "▾ " : "▸ ") : "   ") + r.dir + "/")),
+        h("td", { class: "n" }, fmt(r.files)),
+        h("td", { class: "n" }, r.concerns ? fmt(r.concerns) : "–"),
+        h("td", { class: "n" }, r.owned ? fmt(r.owned) + " files" : "–"),
+        h("td", null, h("div", { class: "seg" }, ["analysed", "one entry", "external"].map(v =>
+          h("button", { class: verdict === v ? "on" : "", title: {
+              analysed: "Part of the product: clustered into entries",
+              "one entry": "Owned, but catalogued as ONE entry without decomposing it",
+              external: "Somebody else's code: invisible to the analysis",
+            }[v], onclick: () => {
+            if (v === r.verdict) scopeEdits.delete(r.glob); else scopeEdits.set(r.glob, v);
+            draw(); dock();
+          } }, v)))));
+      tb.append(tr);
+    }
+    box.replaceChildren(tb);
+  };
+  draw();
+  page.append(h("div", { class: "hint", style: "margin-top:12px" },
+    "Written to ", h("span", { class: "mono" }, S.scopePath || "gitchronicle.md"),
+    ". A rebuild re-reads it: newly external evidence is dropped, newly included commits are untangled (that costs)."));
+}
+
+async function saveScope() {
+  const changes = [...scopeEdits].map(([glob, verdict]) => {
+    const row = scopeRows.find(r => r.glob === glob) || {};
+    return { glob, verdict, siblings: row.siblings || [] };
+  });
+  if (!changes.length) return;
+  const r = await (await fetch("/api/scope/save", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ changes }) })).json();
+  if (r.error) { showErr(r.error); return; }
+  scopeEdits.clear(); scopeRows = null; scopeShadow = r.shadowed || [];
+  toast("Scope saved — rebuild to apply");
+  await loadScope(); render(); dock();
 }
 
 // =========================================================================================
@@ -1610,12 +1979,14 @@ function dock() {
       h("button", { class: "btn", onclick: () => { rebuildState = null; dock(); } }, "Dismiss"));
     d.classList.add("show"); return;
   }
-  const changed = planText !== savedPlan;
+  const changed = planText !== savedPlan || scopeEdits.size > 0;
   if (changed) {
-    d.replaceChildren(h("span", { title: "Nothing changes until you save" + (S.can_rebuild ? " and rebuild" : "") }, h("b", null, "Unsaved rules")),
-      h("button", { class: "btn", onclick: togglePreview }, pvOpen ? "Hide preview" : "Preview"),
-      h("button", { class: "btn", onclick: () => { planText = savedPlan; dirty = 0; pendingMoves.length = 0; pvOpen = false; $("pvpop").classList.remove("show"); afterEdit().then(() => { render(); drawer(route.entry); }); } }, "Discard"),
-      h("button", { class: "btn pri", onclick: save }, S.can_rebuild ? "Save & rebuild" : "Save"));
+    const what = [planText !== savedPlan ? "rules" : "", scopeEdits.size ? scopeEdits.size + " scope change" + (scopeEdits.size > 1 ? "s" : "") : ""].filter(Boolean).join(" + ");
+    // replaceChildren stringifies a null into the bar; h() drops it, so build there
+    d.replaceChildren(...[h("span", { title: "Nothing changes until you save" + (S.can_rebuild ? " and rebuild" : "") }, h("b", null, "Unsaved " + what)),
+      planText !== savedPlan ? h("button", { class: "btn", onclick: togglePreview }, pvOpen ? "Hide preview" : "Preview") : null,
+      h("button", { class: "btn", onclick: () => { planText = savedPlan; dirty = 0; pendingMoves.length = 0; scopeEdits.clear(); pvOpen = false; $("pvpop").classList.remove("show"); afterEdit().then(() => { render(); drawer(route.entry); }); } }, "Discard"),
+      h("button", { class: "btn pri", onclick: save }, S.can_rebuild ? "Save & rebuild" : "Save")].filter(Boolean));
     d.classList.add("show");
   } else d.classList.remove("show");
 }
@@ -1642,8 +2013,10 @@ function toast(msg) {
   document.body.append(t); setTimeout(() => t.remove(), 2200);
 }
 async function save() {
-  const r = await (await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" },
-                                              body: JSON.stringify({ plan: planText }) })).json();
+  if (scopeEdits.size) await saveScope();
+  const r = planText === savedPlan ? {} : await (await fetch("/api/save", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan: planText }) })).json();
   if (r.error) { showErr(r.error); return; }
   savedPlan = planText; dirty = 0; pvOpen = false; $("pvpop").classList.remove("show");
   if (!S.can_rebuild) { toast("Saved — run  gitchronicle update  to rebuild"); dock(); return; }
@@ -1660,7 +2033,7 @@ async function pollRebuild() {
   }
 }
 
-const VIEWS = { ask: renderAsk, catalogue: renderCatalogue, graph: renderGraph, timeline: renderTimeline, review: renderReview, rules: renderRules };
+const VIEWS = { ask: renderAsk, catalogue: renderCatalogue, files: renderFiles, graph: renderGraph, timeline: renderTimeline, review: renderReview, scope: renderScope, rules: renderRules };
 route = parseHash();
 load().then(async () => {
   const d = $("drawer"); d.style.transition = "none";      // a reload lands open, it does not slide

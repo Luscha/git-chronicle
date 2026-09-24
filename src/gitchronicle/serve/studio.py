@@ -28,6 +28,7 @@ from collections import Counter, defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from ..scope import MD_FILE, Scope
 from ..taxonomy.ledger import PLAN_FILE, Ledger, LedgerError
 
 _MIN_TREE_FILES = 6    # a directory smaller than this cannot be meaningfully fragmented
@@ -160,6 +161,124 @@ def _fragmentation(conn, ledger=None, min_files: int = _MIN_TREE_FILES) -> list[
     out.sort(key=lambda r: (bool(r["handled"]), not r["unnamed"],
                             r["top_share"], -r["files"]))
     return out[:120]
+
+
+def _scope_tree(conn, repo: str, scope, depth: int = 2) -> list[dict]:
+    """Every subtree to `depth`, with what it costs the analysis and what the map says.
+
+    The scope map decides what the product IS, and it is the one input nothing in the UI
+    could reach: a vendored tree left in scope put 2,897 of 17,720 concerns on Boost
+    headers and cost the catalogue a framework, because its vocabulary then looked like
+    someone else's. So each row carries the evidence attached to it, not only its size.
+    """
+    from ..extract.git_ingest import run_git
+
+    files = [f for f in run_git(repo, ["ls-files"]).splitlines() if f.strip()]
+    concerns: Counter = Counter()
+    for (fs,) in conn.execute("SELECT files FROM concerns"):
+        for f in json.loads(fs or "[]"):
+            parts = f.split("/")
+            for d in range(1, min(len(parts), depth + 1)):
+                concerns["/".join(parts[:d])] += 1
+    owned: Counter = Counter()
+    for (p,) in conn.execute("SELECT path FROM domain_files"):
+        parts = p.split("/")
+        for d in range(1, min(len(parts), depth + 1)):
+            owned["/".join(parts[:d])] += 1
+
+    by_dir: Counter = Counter()
+    for f in files:
+        parts = f.split("/")
+        for d in range(1, min(len(parts), depth + 1)):
+            by_dir["/".join(parts[:d])] += 1
+
+    rows = []
+    for d, n in by_dir.items():
+        glob = d + "/**"
+        rows.append({"dir": d, "glob": glob, "files": n, "depth": d.count("/"),
+                     "concerns": concerns.get(d, 0), "owned": owned.get(d, 0),
+                     "verdict": scope.verdict(glob),
+                     "siblings": []})
+    kids = defaultdict(list)
+    for r in rows:
+        kids[r["dir"].rsplit("/", 1)[0] if "/" in r["dir"] else ""].append(r["glob"])
+    for r in rows:
+        parent = r["dir"].rsplit("/", 1)[0] if "/" in r["dir"] else ""
+        r["siblings"] = [g for g in kids[parent] if g != r["glob"]]
+    rows.sort(key=lambda r: (r["dir"].split("/")[0], r["depth"], -r["files"]))
+    return rows
+
+
+_WORD = re.compile(r"[a-z][a-z0-9]{3,}")
+
+
+def _stem(w: str) -> str:
+    """Singular/plural only — enough to match a word against an entry's name."""
+    for suffix in ("ies", "es", "s"):
+        if len(w) > 4 and w.endswith(suffix):
+            return w[:-len(suffix)] + ("y" if suffix == "ies" else "")
+    return w
+
+_VOCAB_STOP = {
+    "added", "fixed", "update", "updated", "system", "refactor", "removed", "changed",
+    "support", "handling", "logic", "management", "implementation", "improved", "with",
+    "from", "into", "when", "file", "files", "data", "code", "make", "used", "using",
+    "new", "also", "more", "this", "that", "them", "they", "have", "been", "were",
+    "configuration", "settings", "feature", "features", "function", "functions", "class",
+    "value", "values", "type", "types", "name", "names", "list", "item", "items",
+}
+
+
+def _orphan_vocab(conn, ledger=None, scope=None, limit: int = 12) -> list[dict]:
+    """Words that run through unattributed work and answer to no entry.
+
+    The assembly says `2,494 residue micro-clusters left unattributed` and moves on, so a
+    whole framework can be missing and nothing points at it: 121 concerns mentioned traits
+    here, 106 of them filed nowhere, and no entry was named anything like it. This is the
+    other half of the review queue — fragmented folders are things wrongly split, these
+    are things never seen at all.
+    """
+    names = {r["name"].lower() for r in conn.execute("SELECT name FROM domains")}
+    # "Traits System" answers for "trait": nagging about a word an entry already carries,
+    # because one of them is plural, is the fastest way to make a queue worth ignoring
+    named = {_stem(w) for n in names for w in _WORD.findall(n)}
+    ignored = {_stem(w) for w in (getattr(ledger, "ignored", []) or [])}
+    hits: dict[str, dict] = {}
+    # import families carry the untangler's own words ("bulk change remainder"), not the
+    # project's, so they would flood this list with its own vocabulary
+    for r in conn.execute("SELECT label, files FROM concerns WHERE domain_id IS NULL "
+                          "AND origin IS NULL"):
+        label = (r["label"] or "").lower()
+        fs = json.loads(r["files"] or "[]")
+        for w in set(_WORD.findall(label)):
+            if _stem(w) in named or w in _VOCAB_STOP or _stem(w) in ignored:
+                continue
+            h = hits.setdefault(w, {"word": w, "concerns": 0, "labels": [], "dirs": Counter()})
+            h["concerns"] += 1
+            if len(h["labels"]) < 6:
+                h["labels"].append((r["label"] or "")[:80])
+            for f in fs:
+                h["dirs"]["/".join(f.split("/")[:-1])] += 1
+    # An exclude an include overrides leaves a whole vendored tree in the analysis, and
+    # its vocabulary then floods this list: "boost" with 339 concerns is not a missing
+    # framework, it is a scope rule that does nothing. Say which, and point at the fix.
+    shadow = scope.shadowed() if scope is not None else []
+    out = []
+    for h in sorted(hits.values(), key=lambda x: -x["concerns"])[:limit * 3]:
+        dirs = [d for d, _ in h["dirs"].most_common(4) if d]
+        inert = ""
+        for exc, inc in shadow:
+            probe = exc.rstrip("*").rstrip("/")
+            if dirs and sum(d.startswith(probe) for d in dirs) * 2 > len(dirs):
+                inert = exc
+                break
+        # the paths worth claiming are the ones that carry the word themselves
+        globs = [d + "/**" for d in dirs if h["word"] in d.lower()][:3]
+        out.append({"word": h["word"], "concerns": h["concerns"], "labels": h["labels"],
+                    "dirs": [{"dir": d, "n": h["dirs"][d]} for d in dirs],
+                    "globs": globs, "inert_rule": inert})
+    out.sort(key=lambda r: (bool(r["inert_rule"]), -r["concerns"]))
+    return out[:limit]
 
 
 def _preview(conn, plan_text: str) -> dict:
@@ -329,6 +448,7 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
         "chapters": conn.execute(
             "SELECT COUNT(*) FROM evolution_chapters").fetchone()[0],
         "trees": _fragmentation(conn, led),
+        "vocab": _orphan_vocab(conn, led, Scope.load()),
         "plan": plan_text,
         "plan_path": str(p),
     }
@@ -375,7 +495,7 @@ class _Rebuild:
 
 def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: int = 8765,
                  log=print, provider_factory=None, rebuild_argv: list[str] | None = None,
-                 title: str = "") -> None:
+                 title: str = "", repo: str = "") -> None:
     """Open the knowledge base per request rather than holding it.
 
     `update` swaps the database atomically, so a long-lived connection keeps reading the
@@ -449,6 +569,31 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 st["can_ask"] = provider_factory is not None
                 st["can_rebuild"] = rebuild is not None
                 self._json(st)
+            elif u.path == "/api/scope":
+                c = fresh()
+                try:
+                    sc = Scope.load()
+                    self._json({"rows": _scope_tree(c, repo, sc) if repo else [],
+                                "shadowed": sc.shadowed(), "path": MD_FILE,
+                                "counts": {"include": len(sc.includes), "exclude": len(sc.excludes),
+                                           "acknowledge": len(sc.acknowledges)}})
+                finally:
+                    c.close()
+            elif u.path == "/api/inspect":
+                from .inspect import file_card, find, split_hint
+                c = fresh()
+                try:
+                    sc = Scope.load()
+                    qq = (q.get("q") or [""])[0]
+                    if (q.get("file") or [""])[0]:
+                        self._json(file_card(c, q["file"][0], repo))
+                    else:
+                        out = find(c, qq, scope=sc)
+                        out["hint"] = (split_hint(c, repo, qq, scope=sc)
+                                       if repo and 1 < len(out["files"]) <= 80 else None)
+                        self._json(out)
+                finally:
+                    c.close()
             elif u.path == "/api/search":
                 self._json(index.search((q.get("q") or [""])[0]))
             elif u.path == "/api/rebuild":
@@ -479,6 +624,13 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 plan.write_text(text, encoding="utf-8")
                 log(f"  saved {plan}")
                 self._json({"saved": str(plan)})
+            elif self.path == "/api/scope/save":
+                sc = Scope.load()
+                for ch in body.get("changes") or []:
+                    sc.set(ch["glob"], ch["verdict"], ch.get("siblings") or [])
+                sc.save()
+                log(f"  saved {MD_FILE} ({len(body.get('changes') or [])} scope changes)")
+                self._json({"saved": MD_FILE, "shadowed": sc.shadowed()})
             elif self.path == "/api/ask":
                 question = (body.get("q") or "").strip()
                 try:
