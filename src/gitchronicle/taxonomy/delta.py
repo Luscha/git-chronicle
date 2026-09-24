@@ -96,9 +96,14 @@ def file_authorship(conn, repo: str, files: list[str], log=print) -> dict[str, s
         blob_hashes.add(h)
         if work:
             work_at[h] = work
+    # The first commit of a FORK is the upstream drop and owns nothing; the first commit
+    # of a project started from scratch is the owner's own work. Measured: 2,086 files in
+    # the fork, 7 in httpie — which was being filed as "inherited baseline" for it.
     founding = conn.execute(
-        "SELECT hash FROM commits WHERE is_merge=0 ORDER BY authored_at LIMIT 1").fetchone()
-    if founding:
+        "SELECT c.hash, COUNT(f.path) FROM commits c LEFT JOIN commit_files f "
+        "ON f.commit_hash = c.hash WHERE c.is_merge=0 GROUP BY c.hash "
+        "ORDER BY c.authored_at LIMIT 1").fetchone()
+    if founding and founding[1] > _BLOB_FILES:
         blob_hashes.add(founding[0])
         work_at.pop(founding[0], None)      # the founding import births nothing
 

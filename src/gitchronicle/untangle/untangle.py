@@ -195,6 +195,7 @@ def _overflow_concerns(provider, repo, h, rows, repo_exts):
                 blocks.append(f"[{j}] family '{s}' ({rep.rsplit('/', 1)[-1]}):\n{head}")
             try:
                 got = provider.chat(PEEK_SYS, "\n\n".join(blocks), want_json=True,
+                                    role="untangle", stage="untangle",
                                     cache_extra=f"upeek:{h}:{i}")
             except Exception:  # noqa: BLE001
                 got = {}
@@ -307,7 +308,8 @@ def _infer_diff(provider, repo, h, subject, files, caps):
             f"Changed files:\n" + "\n".join(f"  {f}" for f in files) + "\n\n"
             f"DIFF:\n{diff or '(empty)'}\n\n{SCHEMA}")
     try:
-        return provider.chat(DIFF_SYS, user, want_json=True, cache_extra=f"udiff:{h}")
+        return provider.chat(DIFF_SYS, user, want_json=True, cache_extra=f"udiff:{h}",
+                             role="untangle", stage="untangle")
     except Exception:  # noqa: BLE001
         return {}
 
@@ -320,7 +322,8 @@ def _infer_msg(provider, repo, h, subject, body, files):
             f"Changed file paths:\n" + "\n".join(f"  {f}" for f in files[:14]) + "\n\n"
             'Return JSON: {"concerns":[{"label":"short capability phrase"}]}')
     try:
-        return provider.chat(MSG_SYS, user, want_json=True, cache_extra=f"umsg:{h}")
+        return provider.chat(MSG_SYS, user, want_json=True, cache_extra=f"umsg:{h}",
+                             role="untangle", stage="untangle")
     except Exception:  # noqa: BLE001
         return {}
 
@@ -338,6 +341,17 @@ def untangle(conn, provider, repo: str, log=print, force: bool = False,
     if force:
         conn.execute("DELETE FROM concerns")
         conn.commit()
+    # The scope map is the authority on what the product IS, so evidence it excludes must
+    # not survive in the database. It gets there when the map is absent for one run (the
+    # fallback heuristics are wider): 247 concerns over 132 excluded commits, enough to
+    # change the catalogue. Widening the scope again simply re-untangles them.
+    stale = [r["id"] for r in conn.execute("SELECT id, files FROM concerns").fetchall()
+             if (fs := json.loads(r["files"] or "[]")) and not any(scope(f) for f in fs)]
+    if stale:
+        conn.executemany("DELETE FROM concerns WHERE id=?", [(i,) for i in stale])
+        conn.commit()
+        log(f"  {len(stale)} concerns dropped: every file out of scope (gitchronicle.md)")
+
     # Skip merge commits: with full-ancestry traversal the merged branch's individual commits are
     # already present and carry the granular content — the merge's diff would just double-count them.
     todo = conn.execute(

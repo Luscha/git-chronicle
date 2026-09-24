@@ -50,10 +50,9 @@ from itertools import combinations
 
 from ..extract.git_ingest import run_git
 from .delta import _aliases, file_authorship, history_scan
-from .ground import _STOP, _tokens, path_stems
+from .ground import _SRC_EXTS, _STOP, _tokens, path_stems
 from ..scope import Direction
 from .ledger import Ledger
-from .register import _SRC_EXTS
 from .territory import build_territory
 
 
@@ -91,6 +90,7 @@ _SUBSTRATE_DEG = 50    # a root in >= this many concerns is substrate (~p99, doc
 _GLUE_MIN_DEG = 8      # roots below this degree are never glue-tested
 _GLUE_COHESION = 0.05  # mean pairwise Jaccard of other evidence below this = glue
 _MIN_CONCERNS = 3      # a feature-grade cluster needs at least this many concerns
+_FORK_SHARE = 0.10     # inherited share above which a repo is a fork with a baseline
 _MIN_COMMITS = 2       # ... from at least this many commits
 _CONTENT_SRC_SHARE = 0.2   # below this source-file share a cluster is content, not code
 
@@ -532,7 +532,7 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
     for ci, cl in enumerate(feats):
         try:
             j = provider.chat(name_sys, _cluster_prompt(cl, work), want_json=True,
-                              cache_extra=direction.key(), role="naming")
+                              cache_extra=direction.key(), role="naming", stage="naming")
             name = str(j.get("name") or "").strip()[:80]
             definition = str(j.get("definition") or "").strip()[:400]
         except Exception as e:              # a failed name never blocks the register
@@ -637,19 +637,36 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
         out.executemany("UPDATE concerns SET domain_id=? WHERE id=?",
                         [(did, work[i]["id"]) for i in cl["idxs"]])
 
-    # the inherited baseline: maintenance on vanilla files, catalogued per component
+    # Work that belongs to no feature still has to be findable: upkeep on inherited code
+    # in a fork, and everything too small to be a feature elsewhere. Dropping it cost 11
+    # points of answer quality on httpie, because the evidence had no entry to live in.
+    auth = res["auth"].values()
+    fork = bool(auth) and sum(v == "inherited" for v in auth) / len(auth) >= _FORK_SHARE
+    # A fork already has a baseline bucket: adding everything unplaced to it makes a few
+    # huge entries that crowd real features out of retrieval (measured: -10 points).
+    # A project with no inherited code has no bucket at all, and its unplaced work then
+    # has nowhere to live (httpie: 611 of 1,797 commits attributed, +4 points once fixed).
+    placed = {i for cl in feats for i in cl["idxs"]}
+    leftover = [] if fork else [work[i] for i in range(len(work)) if i not in placed]
+    inherited = fork
     comp_cons: dict[str, list[dict]] = defaultdict(list)
-    for c in res["base"]:
+    for c in list(res["base"]) + leftover:
+        if not c["files"]:
+            continue
         comp = Counter(f.split("/", 1)[0] for f in c["files"]).most_common(1)[0][0]
         comp_cons[comp].append(c)
     for comp, cs in sorted(comp_cons.items()):
         if len(cs) < _MIN_CONCERNS:
             continue
+        name = (f"Inherited baseline — {comp}" if inherited else f"Upkeep — {comp}")
+        what = (f"Maintenance and fixes on inherited (pre-fork) code under {comp}/."
+                if inherited else
+                f"Work under {comp}/ that belongs to no single feature: fixes, chores "
+                f"and one-off changes.")
         cur = out.execute(
             "INSERT INTO domains (name, definition, classification, status, "
-            "n_commits, created_by) VALUES (?,?, 'inherited', 'named', ?, 'lineage')",
-            (f"Inherited baseline — {comp}",
-             f"Maintenance and fixes on inherited (pre-fork) code under {comp}/.",
+            "n_commits, created_by) VALUES (?,?,?, 'named', ?, 'lineage')",
+            (name, what, "inherited" if fork else "upkeep",
              len({c['commit'] for c in cs})))
         did = cur.lastrowid
         cw = Counter(c["commit"] for c in cs)

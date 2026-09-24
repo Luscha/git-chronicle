@@ -10,6 +10,8 @@ flags) and the DOC HARVEST (in-repo prose at HEAD). Both feed the register and t
 health checks; the retired glossary-drafting funnel lived here and is gone.
 """
 
+
+
 from __future__ import annotations
 
 import json
@@ -18,6 +20,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..extract.git_ingest import run_git
+
+# source-code extensions: what makes a cluster code rather than data
+_SRC_EXTS = {"c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "py", "pyw", "lua",
+             "cs", "js", "mjs", "ts", "tsx", "jsx", "java", "go", "rs", "rb", "php"}
 
 # generic path words that can never evidence a feature by themselves (kept as unigram
 # stopwords only — they still appear inside bigrams like "guild war")
