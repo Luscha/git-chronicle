@@ -108,3 +108,83 @@ def test_studio_state_carries_catalogue_timeline_and_plan(kb, tmp_path):
     assert st["catalogue"][0]["name"] == "Battlepass System"
     assert st["timeline"]["entries"]["Battlepass System"]["act"]
     assert st["chapters"] == 1 and st["plan"].startswith("entry")
+
+
+def test_orphan_vocabulary_finds_work_no_entry_answers_to(kb):
+    """121 concerns mentioned traits and none of them had a home; nothing said so."""
+    from gitchronicle.serve.studio import _orphan_vocab
+    c = connect(kb)
+    for i in range(4):
+        c.execute("INSERT INTO concerns (commit_hash, label, files, domain_id) VALUES "
+                  "('abc123def4', ?, '[\"src/traits/a.cpp\"]', NULL)",
+                  (f"Trait stack change {i}",))
+    c.commit()
+    words = {v["word"]: v for v in _orphan_vocab(c, None, None)}
+    assert "trait" in words or "traits" in words
+    v = words.get("trait") or words["traits"]
+    assert v["concerns"] == 4 and v["labels"] and v["globs"] == ["src/traits/**"]
+    # an entry named after it removes it from the queue
+    c.execute("INSERT INTO domains (id, name, classification, status, created_by) "
+              "VALUES (9, 'Traits System', 'feature', 'named', 'ledger')")
+    c.commit()
+    assert not any(w.startswith("trait") for w in
+                   {v["word"] for v in _orphan_vocab(c, None, None)})
+
+
+def test_the_ledger_can_dismiss_a_word(kb):
+    from gitchronicle.taxonomy.ledger import Ledger
+    from gitchronicle.serve.studio import _orphan_vocab
+    c = connect(kb)
+    for i in range(3):
+        c.execute("INSERT INTO concerns (commit_hash, label, files, domain_id) VALUES "
+                  "('abc123def4', ?, '[\"src/x.cpp\"]', NULL)", (f"Widget polish {i}",))
+    c.commit()
+    assert "widget" in {v["word"] for v in _orphan_vocab(c, None, None)}
+    led = Ledger.parse("ignore widget\n")
+    assert "widget" not in {v["word"] for v in _orphan_vocab(c, led, None)}
+
+
+def test_inspect_groups_matches_by_owner(kb):
+    """The unit is the file, wherever it lives: a framework split across seven entries is
+    invisible to both review queues, because every one of its files is filed somewhere."""
+    from gitchronicle.serve.inspect import find
+    c = connect(kb)
+    c.execute("INSERT INTO domains (id, name, tier, classification, status, created_by) "
+              "VALUES (2,'Skill System','feature','feature','named','lineage')")
+    c.execute("INSERT INTO domain_files (domain_id, path, weight, source) "
+              "VALUES (2,'src/traits/trait_dash.cpp',1.0,'register')")
+    c.execute("INSERT INTO domain_files (domain_id, path, weight, source) "
+              "VALUES (1,'src/char_traits.hpp',1.0,'register')")
+    c.commit()
+    r = find(c, "trait")
+    assert {g["name"] for g in r["entries"]} == {"Battlepass System", "Skill System"}
+    # a filename match outranks a file that merely sits in a matching folder
+    assert r["files"][0] == "src/char_traits.hpp"
+
+
+def test_inspect_honours_the_scope_map(kb):
+    from gitchronicle.serve.inspect import find
+    c = connect(kb)
+    c.execute("INSERT INTO commit_files (commit_hash, path) VALUES "
+              "('abc123def4','vendor/boost/type_traits.hpp')")
+    c.commit()
+    assert "vendor/boost/type_traits.hpp" in find(c, "trait")["files"]
+    scope = lambda p: not p.startswith("vendor/")          # noqa: E731 - a stub filter
+    assert "vendor/boost/type_traits.hpp" not in find(c, "trait", scope=scope)["files"]
+
+
+def test_inspect_tells_a_file_what_it_was_built_for(kb):
+    from gitchronicle.serve.inspect import file_card
+    c = connect(kb)
+    c.execute("INSERT INTO commit_files (commit_hash, path) VALUES "
+              "('abc123def4','src/battlepass/ui.py')")
+    c.execute("INSERT INTO commit_files (commit_hash, path) VALUES "
+              "('abc123def4','src/battlepass/quest.py')")
+    c.execute("INSERT INTO concerns (commit_hash, label, summary, files) VALUES "
+              "('abc123def4','Battle pass UI','first pass','[\"src/battlepass/ui.py\"]')")
+    c.commit()
+    card = file_card(c, "src/battlepass/ui.py")
+    assert card["entry"]["name"] == "Battlepass System"
+    assert card["concerns"][0]["label"] == "Battle pass UI"
+    assert card["chapters"] and card["chapters"][0]["title"] == "Built then removed"
+    assert card["cochanged"][0]["path"] == "src/battlepass/quest.py"

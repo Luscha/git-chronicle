@@ -56,6 +56,7 @@ writes as it goes, so the last month is queryable minutes in.
 | `cost` | what the runs cost, per stage; `--estimate N` before they run |
 | `eval` | grade the answers against facts you already know |
 | `ledger` | the curation file: draft one, or open it in `$EDITOR` |
+| `inspect` | one file or one word: who owns it, what it was built for, what belongs with it |
 
 ## What you get
 
@@ -84,17 +85,63 @@ entry "Locale Strings"
 merge  "Wiki Builder Tabs" -> "Wiki Manager"
 reject "Constinfo System"                       # never propose it again
 keep-split client/ui/**                         # shared on purpose; stop asking
+ignore raii                                     # a word that names nothing; stop asking
 ```
 
-The **studio** is where this is comfortable: *Review* ranks folders the catalogue split
-across entries when nothing is named after them; an entry's *Files* tab lets you tick
+The **studio** is where this is comfortable. *Review* has two halves: folders the catalogue
+split across several entries, and **words that run through the work and name no entry** —
+the assembly's residue made visible, which is how a missing framework announces itself
+rather than hiding in a log line. Each word can become an entry, be dismissed with
+`ignore <word>`, or turn out to be a scope rule that is not taking effect. Beyond that, an entry's *Files* tab lets you tick
 folders and assign them elsewhere; *Save & rebuild* applies it. Commits and stories follow
 the files. Replay is pure, so re-graining costs milliseconds and no model calls. A full
 example is in [`examples/ledger.plan`](examples/ledger.plan).
 
-`gitchronicle.md` holds the other half: the **scope map** (which paths are the product)
-and an optional **Direction** section — glossary, grain rules, and how the narration
-should read.
+### Files: surgical curation
+
+Both review queues look for work that is *unfiled*. A framework whose files are scattered
+across seven entries is **misfiled**, and no queue can see it — every one of its files has
+an owner. The studio's **Files** view works at that grain: search a path, a filename or a
+word, and every match appears with whoever owns it today.
+
+Where the matches import each other, it also splits them in two — the files the others
+include (the framework) and the files that include them (its users) — as evidence, not a
+verdict; which of the two you want is your call. Tick what belongs together, name it, and
+the rules are written per source entry so each file is released from exactly the entry that
+held it.
+
+Clicking a path shows what it was built for (the work items behind it), which chapters tell
+its story, and what changes with it. The same data is a command (`gitchronicle inspect
+<path|word>`) and an MCP tool, so an agent can ask before it edits code.
+
+*Measured*: a trait framework whose 8 files sat across 5 entries became one entry in a
+single pass — search, tick, name, save.
+
+### Scope: what is the product
+
+`gitchronicle.md` holds the other half of curation — the **scope map**. Every path it
+admits feeds the catalogue *and its vocabulary*, so leaving a vendored tree in has a cost
+beyond noise: its words start to look like yours, and a feature named after one of them
+never forms. On the reference repository a Boost tree left in scope accounted for 2,897 of
+17,720 concerns and cost the catalogue a whole framework.
+
+The studio's **Scope** view is a tree of the repository, one verdict per subtree:
+
+| verdict | meaning |
+|---|---|
+| analysed | part of the product; clustered into entries |
+| one entry | owned, but catalogued as ONE entry without decomposing it |
+| external | somebody else's code; invisible to the analysis |
+
+Each row shows its files, how much untangled work is attached to it and how much of it the
+catalogue already owns, so the cost of a verdict is visible before you choose it. Marking a
+tree external drops its evidence on the next rebuild; marking one analysed untangles it
+(which costs). The view also reports rules that **do nothing** — an explicit `include:`
+beats an `exclude:`, so a narrower exclusion written under a drafted include is silently
+inert, and it will set the verdict in a way that actually takes effect.
+
+The optional **Direction** section of the same file states glossary, grain rules and how
+the narration should read.
 
 ## For agents: MCP
 
@@ -102,7 +149,8 @@ should read.
 claude mcp add chronicle -- gitchronicle mcp --config /abs/path/config.toml
 ```
 
-Four read-only tools: `search`, `entry`, `path_history` (which entry owns a file and why it
+Five read-only tools: `search`, `entry`, `inspect` (a file or a word: owner, the work behind
+it, what changes with it, and framework-versus-users when several match), `path_history` (which entry owns a file and why it
 looks the way it does — worth calling before changing code) and `period` (what happened in
 a given year). They return evidence, not conclusions; the agent does its own reasoning.
 

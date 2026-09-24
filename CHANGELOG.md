@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Scope view in the studio** — the repository as a tree, one verdict per subtree
+  (analysed / one entry / external), each row carrying the evidence attached to it. It
+  reports rules that do nothing, and setting a verdict makes it take effect rather than
+  being overridden by a broader include. Measured on the reference repository: marking one
+  vendored tree external dropped 2,897 of 17,720 concerns and took the eval from 82% to 90%.
+- **Review has a second half** — words that run through the work and name no entry, with
+  their sample labels and the folders they live in. A missing framework used to hide behind
+  one log line ("2,494 residue micro-clusters left unattributed").
+- **Files view, `gitchronicle inspect`, and an `inspect` MCP tool** — search a path, a
+  filename or a word; see every match with its owner, what it was built for, what changes
+  with it and which chapter tells it; select across entries and assign in one action. Where
+  the matches include each other it separates the framework from its users by edge
+  direction. Correcting a misfiled framework went from seven panels to one pass.
+- **`ignore <word>`** in the ledger, for vocabulary you have looked at and judged to name
+  nothing — the queue's equivalent of `keep-split`.
+
 ## 0.5.0
 
 The knowledge base answers questions, and says what it costs.

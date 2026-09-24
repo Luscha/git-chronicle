@@ -124,3 +124,31 @@ def test_narrowing_the_scope_drops_evidence_it_excludes(config, provider, monkey
         seen |= set(json.loads(f or "[]"))
     assert not any(p.startswith("src/dashboard/") for p in seen)
     assert conn.execute("SELECT COUNT(*) FROM concerns").fetchone()[0] < before
+
+
+def test_scope_can_be_rewritten_without_touching_the_rest_of_the_file(tmp_path, monkeypatch):
+    """The scope view edits this file; everything else in it is the owner's."""
+    from gitchronicle.scope import Scope
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "gitchronicle.md").write_text(
+        "# gitchronicle\n\n## Scope\n\n- include: src/**\n- exclude: vendor/**\n\n"
+        "## Direction\n\nvoice: terse\n")
+    sc = Scope.load()
+    assert sc.verdict("vendor/**") == "external" and sc.verdict("src/**") == "analysed"
+    sc.set("src/thirdparty/**", "external", siblings=["src/app/**"])
+    sc.save()
+    again = Scope.load()
+    # the exclusion took effect although a broader include covered it
+    assert again("src/thirdparty/boost.hpp") is False
+    assert again("src/app/main.py") is True
+    assert "## Direction" in (tmp_path / "gitchronicle.md").read_text()
+    assert "voice: terse" in (tmp_path / "gitchronicle.md").read_text()
+
+
+def test_acknowledged_subtree_is_not_analysed(tmp_path, monkeypatch):
+    from gitchronicle.scope import Scope
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "gitchronicle.md").write_text("# x\n\n## Scope\n\n- acknowledge: tools/vendor/**\n")
+    sc = Scope.load()
+    assert sc.verdict("tools/vendor/**") == "one entry"
+    assert sc("tools/vendor/thing.py") is False

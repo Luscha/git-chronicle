@@ -3,6 +3,48 @@
 Every number here came from a run on a real repository; the method is in the
 commit that produced it.
 
+## A file with two owners has no story
+
+Territory is the union of two passes — the work's own evidence, and files carrying an
+entry's name. Each resolved its own contests and neither looked at the other, so the same
+file could be claimed twice: `notification.proto` belonged to Protobuf by the work done on
+it and to Notification System by its filename.
+
+| | before | after name claims yield to concern evidence |
+|---|---|---|
+| files owned twice | 464 | **0** |
+| territory rows | 6,753 | 6,289 |
+| entries / commits attributed | 225 / 5,129 | unchanged |
+| dependency links | 161 | **177** |
+| eval (17 questions, 3 samples) | 84% ± 1 | **89% ± 1** |
+
+Not merely tidier: while a file had two owners, both entries carried it, both could
+attribute its commits, and retrieval saw one piece of evidence under two names — so an
+answer could name the wrong owner and still look supported. The extra links are a side
+effect: import edges between territories that were previously hidden inside a
+double-owned file resolve into real edges once ownership is single.
+
+## What is not the product is worth more than any clustering tweak
+
+The scope map decides which paths the pipeline may look at. Left alone, `init` drafts it
+from touch counts, and on the reference repository that admitted a vendored Boost tree —
+whose exclusion the owner had written, but an `include:` one level up silently overrode it.
+
+| | before | after marking `Extern-Server/Extern/**` external |
+|---|---|---|
+| concerns in the corpus | 17,720 | **14,823** (2,897 dropped) |
+| concerns mentioning "traits" | 121 | **21** — the rest were C++ `<type_traits>` headers |
+| eval (16 questions, 3 samples) | 82% ± 1 | **90% ± 1** |
+| rebuild | — | 52 s, no model calls |
+
+Eight points from one line of scope, and it also corrected the *question*: "121 pieces of
+trait work are unfiled" was itself an artefact of the vendored tree. The real figure is 21.
+
+What it did **not** do is make a Trait entry appear. The remaining trait work is genuinely
+entangled with the scripting bridge that binds it (`luna/bind_char_traits.cpp`), so twelve
+of its files still sit under that entry. That is the grain problem, not a scope problem,
+and the ledger is what settles it — which is the division of labour the tool is built on.
+
 ## Publishing pass (v0.5)
 
 Measured while making the repository fit to publish:
