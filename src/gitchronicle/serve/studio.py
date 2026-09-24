@@ -281,6 +281,49 @@ def _orphan_vocab(conn, ledger=None, scope=None, limit: int = 12) -> list[dict]:
     return out[:limit]
 
 
+def _relation_hints(conn, ledger=None, limit: int = 12) -> list[dict]:
+    """Entries named in another entry's story, with no edge between them.
+
+    Imports only ever show code calling code: content rendered by a framework, or a quest
+    driven by one, references nothing an extractor can read. But the narration says it —
+    27 such pairs here, against one that the import pass had already found. The sentence
+    that names the other entry is the evidence, and accepting writes `uses` into the plan.
+    """
+    names = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM domains")}
+    edges = {(r["src_domain"], r["dst_domain"]) for r in
+             conn.execute("SELECT src_domain, dst_domain FROM domain_edges")}
+    stated = {(s, d) for s, d in (ledger.relations() if ledger is not None else [])}
+    stated |= {(a, b) for a, b in (getattr(ledger, "not_uses", []) or [])}
+    hits: dict[tuple, dict] = {}
+    for r in conn.execute("SELECT target_id, title, narrative FROM evolution_chapters "
+                          "WHERE target_type='domain' AND narrative IS NOT NULL"):
+        src = int(r["target_id"])
+        for name, did in names.items():
+            if did == src or len(name) <= 6:
+                continue
+            if not re.search(rf"\b{re.escape(name)}\b", r["narrative"]):
+                continue
+            if (src, did) in edges:
+                continue
+            src_name = next((n for n, i in names.items() if i == src), None)
+            if not src_name or (src_name, name) in stated:
+                continue
+            # "Botanic Quest System" names "Quest System" by spelling, not by using it
+            if name.lower() in src_name.lower() or src_name.lower() in name.lower():
+                continue
+            h = hits.setdefault((src, did), {"src": src_name, "dst": name, "mentions": 0,
+                                             "quotes": []})
+            h["mentions"] += 1
+            if len(h["quotes"]) < 2:
+                # the sentence that names it, so the claim can be judged rather than trusted
+                for sent in re.split(r"(?<=[.!?])\s+", r["narrative"]):
+                    if name in sent:
+                        h["quotes"].append(sent.strip()[:240])
+                        break
+    out = sorted(hits.values(), key=lambda h: -h["mentions"])
+    return out[:limit]
+
+
 def _preview(conn, plan_text: str) -> dict:
     """Replay a candidate ledger over the current catalogue. Pure; writes nothing."""
     try:
@@ -449,6 +492,7 @@ def build_state(conn, plan_path: str | Path = PLAN_FILE, plan_text: str | None =
             "SELECT COUNT(*) FROM evolution_chapters").fetchone()[0],
         "trees": _fragmentation(conn, led),
         "vocab": _orphan_vocab(conn, led, Scope.load()),
+        "relhints": _relation_hints(conn, led),
         "plan": plan_text,
         "plan_path": str(p),
     }

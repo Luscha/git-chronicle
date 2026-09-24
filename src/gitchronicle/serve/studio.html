@@ -504,7 +504,8 @@ function index() {
   $("nRul").textContent = parsePlan(planText).length || "";
   // the queue is both halves: folders split apart, and words nothing answers to
   const open = (S.trees || []).filter(t => !t.handled).length
-             + (S.vocab || []).filter(v => !ignoredWords().includes(v.word)).length;
+             + (S.vocab || []).filter(v => !ignoredWords().includes(v.word)).length
+             + (S.relhints || []).filter(r => !statedPairs().some(p => p[0] === r.src && p[1] === r.dst)).length;
   $("nRev").textContent = open || "";
 }
 
@@ -1476,7 +1477,9 @@ function paintLinks(body, r) {
   body.append(h("div", { class: "links" },
     h("div", null, h("h4", null, "Uses · " + up.length), up.length ? up.map(lk) : h("div", { class: "muted" }, "Nothing it imports is catalogued.")),
     h("div", null, h("h4", null, "Used by · " + down.length), down.length ? down.map(lk) : h("div", { class: "muted" }, "Nothing depends on it."))));
-  body.append(h("div", { class: "hint", style: "margin-top:18px" }, "A link means code in one entry imports or includes a file owned by the other."));
+  body.append(h("div", { class: "hint", style: "margin-top:18px" },
+    "A link is code in one entry importing a file owned by the other — or a relation you stated "
+    + "with ", h("span", { class: "mono" }, 'uses "…"'), " in the plan, for the ones no import shows."));
   if (up.length + down.length) body.append(h("button", { class: "btn", style: "margin-top:12px", onclick: () => go("graph", r.name) }, "Show in graph"));
 }
 
@@ -1528,7 +1531,15 @@ function renderReview(main) {
       + "and nothing is named after it. If the files are one thing you built, make them one entry; if they are different "
       + "things that share a folder, mark it as correctly split."))));
   const vocab = (S.vocab || []).filter(v => !ignoredWords().includes(v.word));
+  const rel = (S.relhints || []).filter(r => !statedPairs().some(p => p[0] === r.src && p[1] === r.dst));
   if (!open.length && !vocab.length) page.append(h("div", { class: "card pad empty" }, "Nothing left to review. ", h("a", { onclick: () => go("catalogue") }, "Browse the catalogue →")));
+  if (rel.length) {
+    page.append(h("div", { class: "rgroup" }, "Relations your stories assert and no import shows"));
+    page.append(h("div", { class: "hint", style: "margin:-2px 0 10px" },
+      "An entry named in another's story. Imports only ever show code calling code — content "
+      + "rendered by a framework, or a quest driven by one, references nothing an extractor reads."));
+    for (const r of rel.slice(0, 6)) page.append(relationCard(r));
+  }
   if (vocab.length) {
     page.append(h("div", { class: "rgroup" }, "Words that run through the work and name no entry"));
     page.append(h("div", { class: "hint", style: "margin:-2px 0 10px" },
@@ -1546,6 +1557,39 @@ function renderReview(main) {
 }
 function ignoredWords() {
   return (planText.match(/^ignore\s+(\S+)/gm) || []).map(l => l.split(/\s+/)[1].toLowerCase());
+}
+
+function statedPairs() {
+  const out = [];
+  const re = /^entry\s+"([^"]*)"|^\s+uses\s+"([^"]*)"|^not-uses\s+"([^"]*)"\s*->\s*"([^"]*)"/gm;
+  let cur = null, m;
+  while ((m = re.exec(planText))) {
+    if (m[1] !== undefined) cur = m[1];
+    else if (m[2] !== undefined && cur) out.push([cur, m[2]]);
+    else if (m[3] !== undefined) out.push([m[3], m[4]]);
+  }
+  return out;
+}
+
+function relationCard(r) {
+  const c = h("div", { class: "card rv vocab" });
+  const acts = h("div", { class: "acts" });
+  c.append(h("div", { class: "w" }, r.src, h("span", { class: "muted", style: "font-weight:400" }, "  uses?  "), r.dst),
+    h("div", { class: "facts" }, h("span", null, "named " + r.mentions + "× in " + r.src + "'s story"),
+      h("span", null, "no import connects them")),
+    h("div", { class: "labels" }, r.quotes.map(q => h("div", null, "“" + q + "”"))),
+    acts);
+  acts.append(
+    h("button", { class: "btn pri", onclick: async () => {
+      addToEntry(r.src, ['  uses   "' + r.dst + '"']); await afterEdit();
+      c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ " + r.src + " uses " + r.dst));
+    } }, "Yes, it uses it"),
+    h("button", { class: "btn", onclick: async () => {
+      addLine('not-uses   "' + r.src + '" -> "' + r.dst + '"'); await afterEdit();
+      c.classList.add("done"); acts.replaceChildren(h("span", { class: "tag ok" }, "✓ merely mentioned"));
+    } }, "Just mentioned"),
+    h("button", { class: "btn ghost", onclick: () => openEntry(r.src, "story") }, "read the story →"));
+  return c;
 }
 
 function vocabCard(v) {
