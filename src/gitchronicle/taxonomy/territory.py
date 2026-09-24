@@ -142,10 +142,24 @@ def build_territory(entries: dict[int, dict], concern_territory: dict[int, set],
             continue
         named[next(iter(owners[t]))] |= set(files)
 
-    terr = {eid: set(concern_territory.get(eid, ())) | named.get(eid, set())
-            for eid in entries}
+    # Concern evidence outranks a name match on the SAME file. Both passes resolve their
+    # own contests and neither looked at the other, so 464 files ended up owned twice:
+    # notification.proto belongs to Protobuf by the work done on it and to Notification
+    # System by its filename, and a file with two owners has no answer to "whose story is
+    # this commit part of".
+    held = {f: eid for eid, fs in concern_territory.items() for f in fs}
+    refused = 0
+    terr = {}
+    for eid in entries:
+        own = set(concern_territory.get(eid, ()))
+        for f in named.get(eid, set()):
+            if held.get(f, eid) == eid:
+                own.add(f)
+            else:
+                refused += 1
+        terr[eid] = own
     rep = {"concern": sum(len(v) for v in concern_territory.values()),
-           "named": sum(len(v) for v in named.values()),
+           "named": sum(len(v) for v in named.values()), "refused": refused,
            "contested_token": contested,
            "union": sum(len(v) for v in terr.values())}
 
@@ -166,6 +180,7 @@ def build_territory(entries: dict[int, dict], concern_territory: dict[int, set],
         rep["declared"] = len(declared)
 
     log(f"  territory: {rep['concern']} concern-derived + {rep['named']} name-claimed "
+        f"({refused} name claims refused: the work says otherwise) "
         f"-> {sum(len(v) for v in terr.values())} owned "
         f"({contested} files on tokens shared by several entries)"
         + (f"; {len(declared)} entries declared by the ledger" if declared else ""))
