@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS domain_files (
     path      TEXT NOT NULL,
     weight    REAL,                  -- centrality of this file to the domain
     source    TEXT NOT NULL DEFAULT 'history',  -- 'register' = worktree territory (authoritative), 'history' = derived from attributed commits
+    authored  INTEGER,               -- 1 = the owner wrote it; 0 = it arrived in an import drop
     PRIMARY KEY (domain_id, path)
 );
 CREATE INDEX IF NOT EXISTS idx_domain_files_domain ON domain_files(domain_id);
@@ -338,6 +339,10 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE domains ADD COLUMN tier TEXT")
     if "tier_from" not in cols:   # 'ledger' when a human set it; auto-runs must not clobber
         conn.execute("ALTER TABLE domains ADD COLUMN tier_from TEXT")
+    fcols = {r[1] for r in conn.execute("PRAGMA table_info(domain_files)")}
+    if fcols and "authored" not in fcols:
+        # relations reads this: an import target that nobody here wrote is not a dependency
+        conn.execute("ALTER TABLE domain_files ADD COLUMN authored INTEGER")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(concerns)")}
     for name, decl in (("summary", "TEXT"), ("assign_source", "TEXT"), ("assign_conf", "REAL"),
                        ("origin", "TEXT")):

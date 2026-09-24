@@ -621,9 +621,10 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
         # pretending to a centrality nothing measured
         w = weights.get(ci, {})
         out.executemany(
-            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source) "
-            "VALUES (?,?,?,?)",
-            [(did, f, float(w.get(f, 0)), "register" if alive(f) else "history")
+            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source, authored) "
+            "VALUES (?,?,?,?,?)",
+            [(did, f, float(w.get(f, 0)), "register" if alive(f) else "history",
+              1 if res["auth"].get(f) == "authored" else 0)
              for f in sorted(final.get(ci, ()), key=lambda p: (-w.get(p, 0), p))])
         cw: Counter = Counter()
         for i in cl["idxs"]:
@@ -707,8 +708,9 @@ def emit_register(conn, repo: str, res: dict, out_db: str, provider, log=print) 
              ncom, len(files)))
         did = cur.lastrowid
         out.executemany(
-            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source) "
-            "VALUES (?,?,0.0,'register')", [(did, f) for f in sorted(files)])
+            "INSERT OR IGNORE INTO domain_files (domain_id, path, weight, source, authored) "
+            "VALUES (?,?,0.0,'register',?)",
+            [(did, f, 1 if res["auth"].get(f) == "authored" else 0) for f in sorted(files)])
         out.executemany(
             "INSERT OR IGNORE INTO commit_domains (commit_hash, domain_id, weight, source) "
             "VALUES (?,?,1.0,'ledger')",
