@@ -11,37 +11,9 @@ DEFAULTS: dict[str, Any] = {
     "repo": {"path": ".", "rev_range": "HEAD~300..HEAD"},
     "db": {"path": "gitchronicle.db"},
     "output": {"html": "graph.html", "json": "domains.json"},
-    "providers": {
-        "chat": {
-            # Small model for bulk domain naming (OpenAI-compatible endpoint).
-            # temperature=0 + seed => reproducible untangling/naming (deterministic pipeline).
-            "kind": "openai",
-            "base_url": "https://api.together.xyz/v1",
-            "model": "Qwen/Qwen2.5-7B-Instruct-Turbo",
-            "api_key": "env:TOGETHER_AI_TOKEN",
-            "temperature": 0.0,
-            "seed": 7,
-            "timeout": 180,
-        },
-        "chat_large": {
-            # Bigger model for dependency judgment + query answering.
-            "kind": "openai",
-            "base_url": "https://api.together.xyz/v1",
-            "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-            "api_key": "env:TOGETHER_AI_TOKEN",
-            "temperature": 0.0,
-            "seed": 7,
-            "timeout": 240,
-        },
-        "embed": {
-            "kind": "ollama",
-            "base_url": "http://localhost:11434/v1",
-            "model": "bge-m3",
-            "api_key": "ollama",
-            "batch": 16,
-            "timeout": 900,
-        },
-    },
+    # No vendor default: a knowledge base built against a provider the owner did not
+    # choose is worse than a clear error. `gitchronicle doctor` checks what is configured.
+    "providers": {},
     "cluster": {
         "knn": 10,
         "edge_threshold": 0.12,

@@ -10,10 +10,14 @@ OAuth token minted from Application Default Credentials. Vertex exposes no
 OpenAI-compatible *embeddings* endpoint — keep embeddings on Ollama (or another
 OpenAI-compatible provider) when chat runs on Vertex.
 
-Anthropic (chat-only, no embeddings endpoint) would be a separate adapter; it is
-intentionally not wired for the local-first slice. Claude models served *by* Vertex are
-not reachable here either: they speak the native Anthropic Messages shape on
-``:rawPredict``, not the OpenAI one.
+``kind="anthropic"`` speaks the native Messages API, and ``kind="azure"`` adds the
+api-key header and api-version query Azure OpenAI wants. Anything else that speaks
+OpenAI (Groq, OpenRouter, llama.cpp, LM Studio, Together, ...) needs no adapter: give it
+a ``base_url``. Provider-specific knobs never need code — ``headers``, ``query`` and
+``params`` are passed through as written.
+
+Embeddings are optional: nothing in the current pipeline embeds, and a config without an
+``embed`` role simply cannot call ``embed()``.
 """
 
 from __future__ import annotations
@@ -144,14 +148,39 @@ def _adc_token() -> _ADCToken:
 
 
 def _auth_header(cfg: dict) -> dict:
-    if cfg.get("kind") == "vertex":
+    kind = cfg.get("kind", "openai")
+    if kind == "vertex":
         h = {"Authorization": f"Bearer {_adc_token().token()}"}
         if cfg.get("project"):
             # user ADC (`gcloud auth application-default login`) carries no billing
             # project of its own; Vertex bills and quotas against this one.
             h["x-goog-user-project"] = str(cfg["project"])
-        return h
-    return {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+    elif kind == "anthropic":
+        h = {"x-api-key": cfg.get("api_key", ""),
+             "anthropic-version": cfg.get("anthropic_version", "2023-06-01")}
+    elif kind == "azure":
+        # Azure OpenAI authorises with its own header, not a bearer token
+        h = {"api-key": cfg.get("api_key", "")}
+    else:
+        h = {"Authorization": f"Bearer {cfg.get('api_key', 'x')}"}
+    # whatever the endpoint in front of the model needs: org ids, gateway keys, tenancy
+    h.update({str(k): str(v) for k, v in (cfg.get("headers") or {}).items()})
+    return h
+
+
+def _url(cfg: dict, path: str) -> str:
+    """Endpoint URL, with any query the provider needs (Azure wants api-version)."""
+    base = cfg["base_url"].rstrip("/")
+    if cfg.get("kind") == "anthropic" and base.endswith("/v1"):
+        base = base[:-3]                      # /v1/messages is appended whole
+    url = base + path
+    q = dict(cfg.get("query") or {})
+    if cfg.get("kind") == "azure" and "api-version" not in q:
+        q["api-version"] = cfg.get("api_version", "2024-10-21")
+    if q:
+        from urllib.parse import urlencode
+        url += ("&" if "?" in url else "?") + urlencode(q)
+    return url
 
 
 def _vertex_base_url(cfg: dict) -> str:
@@ -180,8 +209,8 @@ def _extract_json(text: str) -> dict:
 class Provider:
     """Holds chat + embed endpoint configs and a DB connection for caching."""
 
-    def __init__(self, chat_cfg: dict, embed_cfg: dict, chat_large_cfg: dict | None = None,
-                 conn=None, roles: dict | None = None):
+    def __init__(self, chat_cfg: dict, embed_cfg: dict | None = None,
+                 chat_large_cfg: dict | None = None, conn=None, roles: dict | None = None):
         self.chat_cfg = chat_cfg
         self.chat_large_cfg = chat_large_cfg or chat_cfg
         self.embed_cfg = embed_cfg
@@ -199,10 +228,25 @@ class Provider:
                       float(self.chat_large_cfg.get("timeout", 900)))
         self._client = httpx.Client(timeout=timeout)
 
+    # each role falls back along a chain, so configuring none of them is valid and
+    # configuring one of them changes only that job
+    _FALLBACK = {"untangle": ("chat",), "narration": ("chat",), "naming": ("chat",),
+                 "judge": ("chat_large", "chat"), "chat_large": ("chat",)}
+
+    def _role_cfg(self, role: str) -> dict:
+        for r in (role, *self._FALLBACK.get(role, ())):
+            cfg = self.roles.get(r)
+            if cfg:
+                return cfg
+        return self.chat_cfg
+
     # -- embeddings -------------------------------------------------------
     def embed(self, texts: list[str]) -> np.ndarray:
         cfg = self.embed_cfg
-        url = cfg["base_url"].rstrip("/") + "/embeddings"
+        if not cfg:
+            raise LLMError("no [providers.embed] configured — nothing in the pipeline "
+                           "embeds; only the legacy commands do.")
+        url = _url(cfg, "/embeddings")
         headers = _auth_header(cfg)
         batch = int(cfg.get("batch", 16))
         out: list[list[float]] = []
@@ -217,8 +261,8 @@ class Provider:
     # -- chat -------------------------------------------------------------
     def chat(self, system: str, user: str, want_json: bool = True,
              cache_extra: str = "", large: bool = False,
-             role: str | None = None) -> dict | str:
-        cfg = self.roles.get(role or ("chat_large" if large else "chat")) or self.chat_cfg
+             role: str | None = None, stage: str = "") -> dict | str:
+        cfg = self._role_cfg(role or ("chat_large" if large else "chat"))
         provider, model = cfg.get("kind", "openai"), cfg["model"]
         # Generation params are part of the identity of a response — cache on them too, so
         # changing temperature/seed correctly invalidates stale entries.
@@ -235,13 +279,18 @@ class Provider:
 
         if provider == "ollama":
             content, usage = self._chat_ollama(cfg, system, user, want_json)
+        elif provider == "anthropic":
+            content, usage = self._chat_anthropic(cfg, system, user, want_json)
         else:
             content, usage = self._chat_openai(cfg, system, user, want_json)
-        self._cache_put(key, provider, model, content, usage)
+        # the row remembers WHICH job paid, so `gitchronicle cost` can say where the
+        # money went rather than only how much
+        self._cache_put(key, provider, model, content, usage,
+                        stage or role or ("chat_large" if large else "chat"))
         return _extract_json(content) if want_json else content
 
     def _chat_openai(self, cfg: dict, system: str, user: str, want_json: bool):
-        url = cfg["base_url"].rstrip("/") + "/chat/completions"
+        url = _url(cfg, "/chat/completions")
         headers = _auth_header(cfg)
         payload = {
             "model": cfg["model"],
@@ -259,12 +308,36 @@ class Provider:
         if cfg.get("thinking_budget") is not None:
             payload["extra_body"] = {"google": {"thinking_config": {
                 "thinking_budget": int(cfg["thinking_budget"])}}}
+        # anything else the endpoint accepts (max_tokens, top_p, provider extensions):
+        # written into the body as given, so a new knob never needs a new release
+        payload.update(cfg.get("params") or {})
         # json_mode=false is the escape hatch for endpoints that reject response_format;
         # _extract_json already tolerates a model that answers with prose around the object.
         if want_json and cfg.get("json_mode", True):
             payload["response_format"] = {"type": "json_object"}
         data = self._post(url, payload, headers)
         return data["choices"][0]["message"]["content"], data.get("usage")
+
+    def _chat_anthropic(self, cfg: dict, system: str, user: str, want_json: bool):
+        """The native Messages API: system is its own field, and JSON mode does not exist
+        — the prompt already asks for JSON and _extract_json tolerates prose around it."""
+        payload = {
+            "model": cfg["model"],
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "max_tokens": int(cfg.get("max_tokens", 4096)),
+            "temperature": float(cfg.get("temperature", 0.2)),
+        }
+        budget = cfg.get("thinking_budget")
+        if budget:
+            payload["thinking"] = {"type": "enabled", "budget_tokens": int(budget)}
+        payload.update(cfg.get("params") or {})
+        data = self._post(_url(cfg, "/v1/messages"), payload, _auth_header(cfg))
+        text = "".join(b.get("text", "") for b in data.get("content", [])
+                       if b.get("type") == "text")
+        u = data.get("usage") or {}
+        return text, {"prompt_tokens": u.get("input_tokens"),
+                      "completion_tokens": u.get("output_tokens")}
 
     def _chat_ollama(self, cfg: dict, system: str, user: str, want_json: bool):
         """Ollama's native /api/chat — lets us cap threads/context (num_thread,
@@ -333,7 +406,7 @@ class Provider:
             row = self.conn.execute("SELECT response FROM llm_cache WHERE key=?", (key,)).fetchone()
         return row["response"] if row else None
 
-    def _cache_put(self, key, provider, model, response, usage) -> None:
+    def _cache_put(self, key, provider, model, response, usage, stage: str = "chat") -> None:
         if self.conn is None:
             return
         ti = (usage or {}).get("prompt_tokens")
@@ -348,7 +421,7 @@ class Provider:
                 "INSERT OR REPLACE INTO llm_cache "
                 "(key, provider, model, kind, response, tokens_in, tokens_out, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (key, provider, model, "chat", response, ti, to, now_iso()),
+                (key, provider, model, stage, response, ti, to, now_iso()),
             )
             self.conn.commit()
 
@@ -374,20 +447,29 @@ def _resolve_secret(value):
     return value
 
 
+ROLES = ("chat", "chat_large", "embed", "naming", "untangle", "narration", "judge")
+KINDS = ("openai", "azure", "anthropic", "ollama", "vertex")
+
+
 def build_provider(cfg: dict, conn=None) -> Provider:
-    """Construct a Provider from the merged config's ``providers`` section."""
+    """Construct a Provider from the merged config's ``providers`` section.
+
+    Every role but ``chat`` is optional and falls back to it, so a one-provider config is
+    three lines and a per-stage split is opt-in.
+    """
     providers = cfg.get("providers", {})
+    if "chat" not in providers:
+        raise LLMError("no [providers.chat] in the config — every run needs one chat "
+                       "model. See config.example.toml.")
     resolved = {}
-    for name in ("chat", "embed", "chat_large", "naming"):
-        if name not in providers:
-            continue
-        pc = dict(providers[name])
-        if pc.get("kind") == "anthropic":
-            raise LLMError(
-                f"providers.{name}.kind='anthropic' is not supported; "
-                "use an OpenAI-compatible endpoint (ollama/openai/together/scaleway/vertex)."
-            )
-        if pc.get("kind") == "vertex":
+    for name, pc in providers.items():
+        if name not in ROLES:
+            raise LLMError(f"unknown role [providers.{name}]; roles are {', '.join(ROLES)}")
+        pc = dict(pc)
+        kind = pc.get("kind", "openai")
+        if kind not in KINDS:
+            raise LLMError(f"providers.{name}.kind='{kind}' is not one of {', '.join(KINDS)}")
+        if kind == "vertex":
             if name == "embed":
                 raise LLMError(
                     "providers.embed.kind='vertex': Vertex exposes no OpenAI-compatible "
@@ -399,8 +481,14 @@ def build_provider(cfg: dict, conn=None) -> Provider:
             # silently wins. Any endpoint that is not Vertex's is wrong here by definition.
             if "aiplatform.googleapis.com" not in (pc.get("base_url") or ""):
                 pc["base_url"] = _vertex_base_url(pc)
+        if kind == "anthropic" and not pc.get("base_url"):
+            pc["base_url"] = "https://api.anthropic.com"
+        if not pc.get("base_url"):
+            raise LLMError(f"providers.{name} needs a base_url (kind={kind})")
+        if not pc.get("model"):
+            raise LLMError(f"providers.{name} needs a model")
         pc["api_key"] = _resolve_secret(pc.get("api_key", ""))
         resolved[name] = pc
     extra = {k: v for k, v in resolved.items() if k not in ("chat", "embed", "chat_large")}
-    return Provider(resolved["chat"], resolved["embed"], resolved.get("chat_large"),
+    return Provider(resolved["chat"], resolved.get("embed"), resolved.get("chat_large"),
                     conn=conn, roles=extra)
