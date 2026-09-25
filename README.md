@@ -1,4 +1,6 @@
-# gitchronicle
+<p align="center">
+  <img src="docs/img/logo-wide.svg" alt="gitchronicle" width="480">
+</p>
 
 **Turn a git repository into a knowledge base that answers questions about itself.** Not
 what the code is *now* — every tool does that — but what was built, when, why, and what it
@@ -14,6 +16,12 @@ maintained — the last change is from June 2026.
 
 The same knowledge base serves your editor's agent over MCP, a local studio for reading
 and curating it, and static HTML + markdown you can publish.
+
+<p align="center">
+  <img src="docs/img/story.png" alt="An entry's story: its activity over seven years, who wrote it, and chapters cut at the real breaks in the work" width="100%">
+  <br><em>Every entry, with the story its own commits tell — chapters cut where the work
+  actually turned, not every fortnight.</em>
+</p>
 
 ---
 
@@ -72,6 +80,12 @@ writes as it goes, so the last month is queryable minutes in.
 - **Answers** — `gitchronicle ask`, citing entries and commits.
 - **Exports** — `kb.html` and per-entry markdown, for reading or publishing.
 
+<p align="center">
+  <img src="docs/img/graph.png" alt="The dependency graph: what is built on what, from imports" width="100%">
+  <br><em>What is built on what, from imports rather than guesses — and every link opens
+  into the references behind it.</em>
+</p>
+
 ## Curation: the tool proposes, you decide
 
 No tool can know that two directories are one framework while a third is one feature and
@@ -106,6 +120,13 @@ own: **Stories** says how many entries have none, which ones, and what a run wil
 before it starts. Commits and stories follow
 the files. Replay is pure, so re-graining costs milliseconds and no model calls. A full
 example is in [`examples/ledger.plan`](examples/ledger.plan).
+
+<p align="center">
+  <img src="docs/img/review.png" alt="Review: files nobody owns that carry an entry's name, with the evidence for each" width="100%">
+  <br><em>Review is a queue of questions with their evidence attached. Here: entries whose
+  code belongs to nobody — <code>raid_manager.cpp</code>, in 60 of Raid System's own
+  commits, owned by nothing.</em>
+</p>
 
 ### Files: surgical curation
 
