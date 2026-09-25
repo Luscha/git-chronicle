@@ -20,11 +20,12 @@ from rich.table import Table
 
 from .chronicle import chronicle
 from .untangle import untangle
-from .config import load_config
+from .config import OVERRIDES as config_overrides, load_config
 from .enrich import enrich
 from .extract import ingest
 from .extract.git_ingest import run_git
 from .llm import build_provider
+from .llm.provider import LLMError
 from .storage import connect, init_db
 
 console = Console()
@@ -82,8 +83,25 @@ def _version_cb(value: bool):
 
 @app.callback()
 def _main(version: bool = typer.Option(False, "--version", callback=_version_cb,
-                                       is_eager=True, help="Show version and exit")):
-    """gitchronicle: git history -> domain knowledge base."""
+                                       is_eager=True, help="Show version and exit"),
+          model: Optional[list[str]] = typer.Option(None, "--model", metavar="ROLE=NAME",
+              help="Point one role at another model, e.g. answer=gpt-4o-mini. Repeatable"),
+          think: Optional[list[str]] = typer.Option(None, "--think", metavar="ROLE=off|N|EFFORT",
+              help="Reasoning for one role: off, a token budget, or low/medium/high"),
+          endpoint: Optional[list[str]] = typer.Option(None, "--endpoint", metavar="ROLE=NAME",
+              help="Run one role on another endpoint, e.g. untangle=local. Repeatable")):
+    """gitchronicle: git history -> domain knowledge base.
+
+    No vendor of its own: [endpoints] in config.toml says where models live, [roles] says
+    which one does which job, and --model/--think/--endpoint override any of them for one
+    run. The same from the environment (GITCHRONICLE_ANSWER_MODEL, GITCHRONICLE_BASE_URL,
+    GITCHRONICLE_API_KEY, GITCHRONICLE_MODEL) for a process someone else launches — with
+    those three, no config file is needed at all. An api_key may be written as env:VAR or
+    file:/run/secrets/key. See `gitchronicle models`.
+    """
+    config_overrides["model"] = list(model or [])
+    config_overrides["think"] = list(think or [])
+    config_overrides["endpoint"] = list(endpoint or [])
 
 
 # ---- pipeline stages --------------------------------------------------------
@@ -318,6 +336,7 @@ def studio_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: st
     serve_studio(db or cfg.get("output", {}).get("kb", cfg["db"]["path"]),
                  log=_log, port=port, provider_factory=provider_factory,
                  title=Path(cfg["repo"]["path"]).name, repo=cfg["repo"]["path"],
+                 config_path=str(Path(config).resolve()),
                  rebuild_argv=[sys.executable, "-m", "gitchronicle", "update",
                                "--config", config])
 
@@ -450,6 +469,68 @@ def inspect_cmd(query: str = typer.Argument("", help="A path, a filename, a word
         for f in hint["clients"][:8]:
             _log(f"    {f}")
         _log("  claim the first group as one entry; the second belongs to whatever uses it.")
+
+
+@app.command(name="models")
+def models_cmd(config: str = _Config, repo: str = _Repo, rev: str = _Rev, db: str = _Db,
+               available: bool = typer.Option(False, "--available",
+                   help="Ask each endpoint which models it can run")):
+    """Where models live, and which one does which job.
+
+    gitchronicle ships no endpoint and no key: you bring one. Any OpenAI-compatible URL
+    works, `kind` is sugar for an address we happen to know, and the long tail belongs
+    behind a LiteLLM or OpenRouter proxy — which is the same protocol.
+    """
+    from .llm.endpoints import KINDS, ROLE_HELP, ROLES
+    cfg, conn = _setup(config, repo, rev, db)
+    for line in cfg.get("_overrides") or []:
+        _log(f"  override: {line}")
+    ends, roles = cfg.get("endpoints") or {}, cfg.get("roles") or {}
+    if not ends and not roles:
+        _head("No model configured")
+        _log("  One endpoint and one model is a whole configuration:")
+        _log("")
+        _log('    [endpoints.mine]')
+        _log('    kind    = "openai"            # sugar for an address, see below')
+        _log('    api_key = "env:OPENAI_API_KEY"   # or file:/run/secrets/key')
+        _log("")
+        _log('    [roles.chat]')
+        _log('    model   = "gpt-4o-mini"')
+        _log("")
+        _log("  kinds that carry their own address:")
+        for k, v in sorted(KINDS.items()):
+            _log(f"    {k:12} {v.get('base_url', '(from your project)')}")
+        _log("")
+        _log("  Anything else is the same two fields written out — base_url + auth — and")
+        _log("  a LiteLLM or OpenRouter proxy covers whatever speaks no protocol we know.")
+        return
+    from .llm.endpoints import key_ref, resolve_endpoint
+    _head("Endpoints")
+    for name, spec in ends.items():
+        e = resolve_endpoint(name, spec)       # the kind's row, then the file over the top
+        _log(f"  {name:12} {e['protocol']:10} {e.get('base_url') or '(built from your project)'}")
+        _log(f"               auth: {e['auth']} · key: {key_ref(e)}")
+    _head("Roles")
+    try:
+        pr = build_provider(cfg, conn)
+    except LLMError as exc:
+        # a configuration mistake deserves the sentence that says what to fix, not a
+        # traceback through the resolver
+        console.print(f"[red]  {exc}[/]")
+        raise typer.Exit(1) from None
+    for role in ROLES:
+        c = pr.roles.get(role)
+        if not c:
+            continue
+        think = ("off" if c.get("think_budget") == 0 else f"≤{c['think_budget']}"
+                 if c.get("think_budget") else c.get("think_effort") or "unlimited")
+        via = f"  ← {c['inherited_from']}" if c.get("inherited_from") else ""
+        _log(f"  {role:11} {c.get('name', '?'):10} {c['model']:30} thinking {think}{via}")
+        _log(f"              {ROLE_HELP.get(role, '')}")
+        if available and not c.get("inherited_from"):
+            found = pr.list_models(role)
+            _log(f"              {len(found)} available: {', '.join(found[:6])}" if found
+                 else f"              (no listing: {getattr(pr, 'last_list_error', 'not offered')})")
 
 
 @app.command(name="doctor")

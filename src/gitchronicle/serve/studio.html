@@ -67,10 +67,42 @@ mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px }
 .navi svg { width:17px; height:17px; flex:none; opacity:.85 }
 .navi .count { margin-left:auto; font-size:11.5px; color:var(--muted); font-weight:500 }
 .navi .count.hot { background:var(--warn-soft); color:var(--warn); padding:0 7px; border-radius:99px }
-.sidefoot { margin-top:auto; border-top:1px solid var(--line); padding:14px 8px 0;
-  font-size:12px; color:var(--muted); display:grid; gap:4px }
-.sidefoot b { color:var(--fg-2); font-weight:600 }
-.sidefoot .narr { margin-top:2px; padding-top:6px; border-top:1px dashed var(--line) }
+#modal { position:fixed; inset:0; background:rgba(15,17,21,.44); display:none; z-index:60;
+  align-items:flex-start; justify-content:center; padding:5vh 16px }
+#modal.show { display:flex }
+#modal .sheet { background:var(--bg); border:1px solid var(--line); border-radius:14px;
+  width:min(1120px,96vw); max-height:88vh; overflow:auto; box-shadow:0 24px 60px rgba(0,0,0,.28) }
+.sheet .mh { padding:20px 26px 14px; border-bottom:1px solid var(--line) }
+.sheet .mh h2 { font-size:17px; letter-spacing:-.01em }
+.sheet .mb { padding:16px 26px 22px }
+.sheet .mf { position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line);
+  padding:12px 26px; display:flex; gap:8px; align-items:center }
+.sheet .sec { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint);
+  font-weight:600; margin:6px 0 8px }
+.role.role4 { grid-template-columns:110px 170px minmax(260px,1fr) 250px }
+.epbox { display:grid; grid-template-columns:150px 150px minmax(240px,1fr) 210px auto; gap:10px;
+  align-items:center; padding:11px 0; border-top:1px solid var(--line-2) }
+.epbox.new { border-top:1px dashed var(--line); margin-top:4px }
+.epbox .ok { color:var(--ok) } .epbox .bad { color:var(--bad) }
+.epbox .adc { grid-template-columns:auto 220px 220px 1fr; gap:10px; align-items:center; padding-top:2px }
+@media (max-width: 980px) {
+  .epbox { grid-template-columns:1fr 1fr; }
+  .epbox > :nth-child(3) { grid-column:1/-1 }
+  .role.role4 { grid-template-columns:100px 1fr; row-gap:6px }
+  .role.role4 > :nth-child(n+3) { grid-column:2/-1 }
+  .epbox .adc { grid-template-columns:1fr 1fr }
+}
+.role { display:grid; grid-template-columns:150px 1fr 190px; gap:12px; align-items:center;
+  padding:10px 0; border-top:1px solid var(--line-2) }
+.role:first-of-type { border-top:0 }
+.role .nm { font-weight:600; font-size:13px }
+.role .nm small { display:block; font-weight:400; color:var(--muted); font-size:11px; margin-top:1px }
+.role .key .bad { color:var(--bad) }
+.role .key { font-size:11.5px; color:var(--faint); grid-column:2/-1;
+  margin:-6px 0 2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.navi.settings { margin-top:auto; border-top:1px solid var(--line); border-radius:0;
+  padding-top:14px; margin-bottom:-4px }
+.navi.settings:hover { background:transparent; color:var(--fg) }
 #main { overflow:auto; position:relative }
 .page { max-width:1180px; margin:0 auto; padding:34px 40px 120px }
 .page.wide { max-width:none; padding:0; height:100% }
@@ -414,8 +446,9 @@ body.dopen #dock, body.dopen #pvpop { left:calc((100vw - min(600px,100vw) + 232p
     <div class="navi" data-v="stories"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v17H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M8 7h7M8 11h5"/></svg>Stories<span class="count" id="nStory"></span></div>
     <div class="navi" data-v="scope"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2"/></svg>Scope<span class="count" id="nScope"></span></div>
     <div class="navi" data-v="rules"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>Rules<span class="count" id="nRul"></span></div>
-    <div class="sidefoot" id="foot"></div>
+    <div class="navi settings" id="settingsbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.61.65 1.06 1.28 1.09H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Models</div>
   </aside>
+  <div id="modal"><div class="sheet" id="sheet"></div></div>
   <main id="main"><div class="page"><div class="empty">Loading the knowledge base…</div></div></main>
 </div>
 <section id="drawer" aria-label="Entry"></section>
@@ -523,10 +556,7 @@ async function load() {
   const tl = S.timeline;
   const y0 = tl.start ? tl.start.slice(0, 4) : "";
   const y1 = tl.start ? String(+y0 + Math.floor((+tl.start.slice(5, 7) - 1 + tl.months - 1) / 12)) : "";
-  $("foot").replaceChildren(...[
-    h("div", null, h("b", null, fmt(S.catalogue.length)), " entries · ", h("b", null, fmt(S.edges.length)), " links"),
-    h("div", null, h("b", null, fmt(S.chapters)), " chapters · ", h("b", null, fmt(S.commits)), " commits"),
-    h("div", null, y0 + " – " + y1)].filter(Boolean));
+  S.span = y0 && y1 ? y0 + " – " + y1 : "";
   render();
 }
 
@@ -552,6 +582,8 @@ function index() {
   const waiting = (S.unnarrated || []).length;
   $("nStory").textContent = waiting || "";
   $("nStory").className = "count" + (waiting ? " hot" : "");
+  // no config file to write means no panel: the studio never invents one
+  $("settingsbtn").style.display = S.has_config ? "" : "none";
 }
 
 // ---------- routing: #view or #view/Entry Name -----------------------------------------
@@ -585,7 +617,10 @@ function render() {
   VIEWS[route.view](main);
   dock();
 }
-for (const n of document.querySelectorAll(".navi")) n.onclick = () => go(n.dataset.v);
+for (const n of document.querySelectorAll(".navi")) if (n.dataset.v) n.onclick = () => go(n.dataset.v);
+$("settingsbtn").onclick = () => openSettings();
+$("settingsbtn").style.display = "none";          // shown once the state says there is a config
+$("modal").onclick = e => { if (e.target.id === "modal") closeSettings(); };
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && route.entry) { go(route.view); return; }
   if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
@@ -760,6 +795,13 @@ function renderCatalogue(main) {
     h("h1", null, "Catalogue"),
     h("p", null, "Everything the knowledge base knows about, flat — tiers are an attribute, not a hierarchy. "
       + "Click an entry to read its story, see its files, or split it apart."))));
+  // the project's own numbers belong with what they are about, not in a corner of the rail
+  page.append(h("div", { class: "stats", style: "margin-bottom:20px" },
+    h("div", null, h("b", null, fmt(S.catalogue.length)), h("span", null, "entries")),
+    h("div", null, h("b", null, fmt(S.edges.length)), h("span", null, "links")),
+    h("div", null, h("b", null, fmt(S.chapters)), h("span", null, "chapters")),
+    h("div", null, h("b", null, fmt(S.commits)), h("span", null, "commits")),
+    S.span ? h("div", null, h("b", null, S.span), h("span", null, "years covered")) : null));
   const seg = h("div", { class: "seg" });
   const segBtn = (k, label, n) => h("button", { class: catTier === k ? "on" : "", onclick: () => { catTier = k; draw(); paintSeg(); } },
     k !== "all" ? dotEl(k) : null, label, h("small", null, n));
@@ -1723,6 +1765,201 @@ function paintCurate(body, r) {
 // =========================================================================================
 // REVIEW
 // =========================================================================================
+// The models are the entry point: every other decision in the tool is deterministic, and
+// this is the one a new user has to get right. Two tables, because they are two questions:
+// WHERE models live, and WHICH one does which job. Credentials are shown as references and
+// never editable — a key typed into a web page and written to disk is a different risk.
+let settings = null;
+// staged changes live ACROSS redraws: connecting an endpoint redraws the panel, and the
+// first version rebuilt this object there — so the endpoint you just added vanished
+let edits = { endpoints: {}, roles: {} };
+async function openSettings() {
+  const m = $("modal"), sheet = $("sheet");
+  m.classList.add("show");
+  edits = { endpoints: {}, roles: {} };
+  sheet.replaceChildren(h("div", { class: "mb" }, h("div", { class: "hint" }, "Reading the config…")));
+  settings = await (await fetch("/api/settings")).json();
+  drawSettings();
+}
+function closeSettings() { $("modal").classList.remove("show"); settings = null; }
+
+function drawSettings() {
+  const sheet = $("sheet");
+  const body = h("div", { class: "mb" });
+  const names = () => (settings.endpoints || []).map(e => e.name);
+
+  // ---- 1. connect ------------------------------------------------------------------
+  body.append(h("div", { class: "sec" }, "1 · Connect an endpoint"));
+  if (!(settings.endpoints || []).length)
+    body.append(h("div", { class: "hint", style: "margin-bottom:10px" },
+      "Nothing connected yet. gitchronicle brings no endpoint and no key of its own — pick a provider, paste a key, connect."));
+  for (const e of settings.endpoints || []) body.append(endpointRow(e));
+  body.append(endpointRow(null));
+
+  // ---- 2. assign -------------------------------------------------------------------
+  body.append(h("div", { class: "sec", style: "margin-top:22px" }, "2 · Say which model does which job"));
+  if (!(settings.endpoints || []).length)
+    body.append(h("div", { class: "hint" }, "Connect an endpoint first."));
+  for (const r of settings.roles || []) {
+    const note = (edits.roles[r.role] = edits.roles[r.role] || {});
+    const inherits = "— inherits " + (r.falls_back_to || "chat") + " —";
+    const ep = h("select", { class: "field" },
+      // `chat` is the default and has nothing to inherit from; every other role can be
+      // handed back, which means REMOVING its block — not blanking a field in it
+      ...(r.falls_back_to ? [new Option(inherits, "")] : []),
+      ...names().map(n => new Option(n, n)));
+    ep.value = r.set && r.endpoint ? r.endpoint : "";
+    ep.addEventListener("change", () => {
+      if (!ep.value && r.falls_back_to) {
+        for (const k of Object.keys(note)) delete note[k];
+        note._remove = true;
+        model.value = ""; model.placeholder = "inherits " + r.falls_back_to;
+        think.value = ""; why.replaceChildren("follows " + r.falls_back_to + " from now on");
+        return;
+      }
+      delete note._remove;
+      note.endpoint = ep.value;
+    });
+    const model = h("input", { class: "field", list: "models-" + r.role,
+      placeholder: r.set ? "model" : "inherits " + (r.falls_back_to || "chat"),
+      value: r.set ? (r.model || "") : "" });
+    model.addEventListener("input", () => { delete note._remove; note.model = model.value.trim(); });
+    const mdl = h("datalist", { id: "models-" + r.role });
+    let asked = false;
+    model.addEventListener("focus", async () => {
+      if (asked) return;
+      asked = true;
+      const got = await (await fetch("/api/models?role=" + r.role)).json();
+      mdl.replaceChildren(...(got.models || []).map(m => new Option(m)));
+    });
+    const think = h("select", { class: "field" }, new Option("thinking: as it comes", ""),
+      new Option("off", "off"), new Option("budget 128", "128"), new Option("budget 1024", "1024"),
+      new Option("low", "low"), new Option("medium", "medium"), new Option("high", "high"));
+    think.value = r.think || "";
+    think.addEventListener("change", () => { delete note._remove; note.think = think.value || null; });
+    const test = h("button", { class: "btn ghost xs", onclick: async () => {
+      test.textContent = "…";
+      const got = await (await fetch("/api/settings/test", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: r.role }) })).json();
+      test.textContent = got.ok ? "✓ " + got.seconds + "s" : "✗";
+      if (got.error) why.replaceChildren(h("span", { class: "bad" }, got.error.slice(0, 200)));
+    } }, "test");
+    const why = h("div", { class: "key" }, r.what);
+    body.append(h("div", { class: "role role4" }, h("div", { class: "nm" }, r.role),
+      ep, model, h("div", { class: "row", style: "gap:6px" }, think, test)), mdl, why);
+  }
+
+  body.append(h("div", { class: "hint", style: "margin-top:16px" },
+    "Thinking is billed as output and is most of the wait: answering here went from 13.4s to 2.9s with it off. ",
+    "A key you type is written to the ", h("span", { class: "mono" }, ".env"), " beside your config (0600) and the config keeps only ",
+    h("span", { class: "mono" }, 'api_key = "env:NAME"'), ", so the config stays safe to share. ",
+    "For a provider none of the three protocols fit, point an endpoint at a LiteLLM or OpenRouter proxy."));
+
+  sheet.replaceChildren(
+    h("div", { class: "mh" }, h("h2", null, "Models"),
+      h("div", { class: "hint", style: "margin:4px 0 0" },
+        "Connect an endpoint, then say which model does which job. Every job falls back to ",
+        h("span", { class: "mono" }, "chat"), ", so one endpoint and one model is a complete setup.")),
+    body,
+    h("div", { class: "mf" }, h("span", { class: "hint", style: "margin:0" }, settings.path || ""),
+      h("button", { class: "btn ghost", style: "margin-left:auto", onclick: closeSettings }, "Close"),
+      h("button", { class: "btn pri", onclick: () => saveSettings() }, "Save")));
+}
+
+// One connection: a provider, an address, a key — and a probe that says whether the three
+// of them work together, before any of it is written anywhere.
+function endpointRow(e) {
+  const isNew = !e;
+  const box = h("div", { class: "epbox" + (isNew ? " new" : "") });
+  const name = h("input", { class: "field", placeholder: "name it (work, local, …)",
+    value: e ? e.name : "", disabled: !isNew });
+  const kind = h("select", { class: "field" }, new Option("— provider —", ""),
+    ...Object.keys(settings.kinds || {}).map(k => new Option(k, k)), new Option("custom…", "custom"));
+  kind.value = e ? (e.kind || "custom") : "";
+  const url = h("input", { class: "field", placeholder: "https://…/v1",
+    value: e ? (e.base_url || "") : "" });
+  const key = h("input", { class: "field", type: "password", autocomplete: "new-password",
+    placeholder: e ? (e.key === "none" ? "API key" : "key set — type to replace") : "API key (blank if none)" });
+  // Google ADC takes no key at all; it takes a project — and a panel that only asked for
+  // keys could not configure it
+  const project = h("input", { class: "field", placeholder: "gcp project",
+                               value: e ? (e.project || "") : "" });
+  const location = h("input", { class: "field", placeholder: "location (us-central1)",
+                                value: e ? (e.location || "") : "" });
+  const adcRow = h("div", { class: "adc", style: "display:none;grid-column:1/-1" },
+    h("span", { class: "hint", style: "margin:0" }, "Application Default Credentials — no key:"),
+    project, location);
+  const syncAuth = () => {
+    const row = (settings.kinds || {})[kind.value] || {};
+    const adc = row.auth === "adc" || (e && e.auth === "adc");
+    adcRow.style.display = adc ? "grid" : "none";
+    key.style.display = adc ? "none" : "";
+  };
+  const status = h("div", { class: "hint", style: "grid-column:1/-1;margin:3px 0 0" },
+    e ? [e.protocol + " · " + (e.base_url || "built from your project") + " · key: " + e.key] : []);
+  kind.addEventListener("change", () => {
+    const row = (settings.kinds || {})[kind.value];
+    if (row !== undefined) url.value = row.base_url || "";
+    if (isNew && !name.value.trim() && kind.value && kind.value !== "custom") name.value = kind.value;
+    syncAuth();
+  });
+  const probe = h("button", { class: "btn ghost xs", onclick: async () => {
+    probe.textContent = "…";
+    const spec = { kind: kind.value === "custom" ? null : kind.value, base_url: url.value.trim(),
+                   api_key: key.value, project: project.value.trim(), location: location.value.trim() };
+    const got = await (await fetch("/api/settings/probe", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint: spec }) })).json();
+    probe.textContent = "test";
+    status.replaceChildren(got.ok
+      ? h("span", { class: "ok" }, got.note ? "✓ " + got.note
+          : "✓ reachable — " + got.models.length + " models: " + got.models.slice(0, 5).join(", "))
+      : h("span", { class: "bad" }, got.error || "no answer, and no model listing"));
+  } }, "test");
+  const add = isNew ? h("button", { class: "btn", onclick: () => {
+    const n = name.value.trim();
+    if (!n) { status.replaceChildren(h("span", { class: "bad" }, "Give it a name.")); return; }
+    edits.endpoints[n] = { kind: kind.value === "custom" ? null : kind.value,
+                           base_url: url.value.trim() || null, api_key: key.value || null,
+                           project: project.value.trim() || null, location: location.value.trim() || null };
+    settings.endpoints.push({ name: n, kind: kind.value, protocol: "openai",
+      base_url: url.value.trim() || ((settings.kinds || {})[kind.value] || {}).base_url || "",
+      key: key.value ? "…" : "none", project: project.value.trim(), location: location.value.trim() });
+    drawSettings();
+  } }, "Connect") : h("button", { class: "btn ghost xs", onclick: () => {
+    edits.endpoints[e.name] = { base_url: url.value.trim() || null,
+                                api_key: key.value || undefined, kind: kind.value === "custom" ? null : kind.value,
+                                project: project.value.trim() || undefined,
+                                location: location.value.trim() || undefined };
+    status.replaceChildren(h("span", { class: "ok" }, "✓ will be saved"));
+  } }, "apply");
+  box.append(name, kind, url, key, h("div", { class: "row", style: "gap:6px" }, probe, add),
+             adcRow, status);
+  syncAuth();
+  return box;
+}
+
+async function saveSettings() {
+  const roles = {};
+  for (const [role, f] of Object.entries(edits.roles)) {
+    const keep = {};
+    for (const [k, v] of Object.entries(f)) if (v !== undefined) keep[k] = v;
+    if (Object.keys(keep).length) roles[role] = keep;
+  }
+  const ends = {};
+  for (const [n, f] of Object.entries(edits.endpoints)) {
+    const keep = {};
+    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== null) keep[k] = v;
+    if (Object.keys(keep).length) ends[n] = keep;
+  }
+  if (!Object.keys(roles).length && !Object.keys(ends).length) return closeSettings();
+  const r = await (await fetch("/api/settings", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoints: ends, roles }) })).json();
+  if (r.error) { showErr(r.error); return; }
+  closeSettings();
+  toast(r.changed.length + " change" + (r.changed.length === 1 ? "" : "s") + " saved");
+}
+
 async function renderStories(main) {
   // a narration started from the terminal is the same run: ask the server rather than
   // trusting what this page happens to have seen

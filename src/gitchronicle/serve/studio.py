@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from collections import Counter, defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -557,7 +558,7 @@ class _Rebuild:
 
 def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: int = 8765,
                  log=print, provider_factory=None, rebuild_argv: list[str] | None = None,
-                 title: str = "", repo: str = "") -> None:
+                 title: str = "", repo: str = "", config_path: str = "") -> None:
     """Open the knowledge base per request rather than holding it.
 
     `update` swaps the database atomically, so a long-lived connection keeps reading the
@@ -611,6 +612,7 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                 finally:
                     c.close()
                 st.update(project=title, can_ask=provider_factory is not None,
+                          has_config=bool(config_path),
                           can_rebuild=rebuild is not None)
                 boot = ("<script>window.__STATE__=" + json.dumps(st).replace("</", "<\\/")
                         + "</script>").encode()
@@ -629,6 +631,7 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                     c.close()
                 st["project"] = title
                 st["can_ask"] = provider_factory is not None
+                st["has_config"] = bool(config_path)
                 st["can_rebuild"] = rebuild is not None
                 self._json(st)
             elif u.path == "/api/scope":
@@ -657,6 +660,16 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                         self._json(out)
                 finally:
                     c.close()
+            elif u.path == "/api/models":
+                # what this role's endpoint says it can run: typing a model name from
+                # memory is where a first setup goes wrong
+                role = (q.get("role") or ["chat"])[0]
+                pv = provider()
+                self._json({"models": pv.list_models(role) if pv else []})
+            elif u.path == "/api/settings":
+                from ..settings import read as read_settings
+                self._json(read_settings(config_path) if config_path
+                           else {"path": "", "roles": []})
             elif u.path == "/api/why":
                 from ..taxonomy.relations import edge_evidence
                 c = fresh()
@@ -713,6 +726,68 @@ def serve_studio(db_path: str | Path, plan_path: str | Path = PLAN_FILE, port: i
                         self._json(ask(index, db, prov, question))
                 except Exception as exc:  # noqa: BLE001 - the page shows it, the server lives
                     self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            elif self.path == "/api/settings":
+                from ..settings import write as write_settings
+                if not config_path:
+                    self._json({"error": "no config file to write"}, 400)
+                    return
+                try:
+                    ends = {n: dict(v) for n, v in (body.get("endpoints") or {}).items()}
+                    # a typed key never reaches the config file: it goes to the .env beside
+                    # it and the config carries the reference
+                    from ..settings import write_secret
+                    for name, spec in ends.items():
+                        if spec.get("api_key"):
+                            spec["api_key"] = write_secret(config_path, name, spec["api_key"],
+                                                           spec.pop("key_mode", "env"))
+                        spec.pop("key_mode", None)
+                    said = write_settings(config_path, ends, body.get("roles") or {})
+                except (ValueError, OSError) as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                # the provider is built once and cached; a model change must reach the next
+                # question rather than the next restart
+                provider_box.pop("p", None)
+                for line in said:
+                    log(f"  {line}")
+                self._json({"saved": config_path, "changed": said})
+            elif self.path == "/api/settings/probe":
+                # can this endpoint be reached and authenticated? A listing answers both
+                # without needing a model name, which a brand-new endpoint does not have
+                from ..llm.endpoints import resolve_endpoint
+                from ..llm.provider import build_provider
+                spec = {k: v for k, v in (body.get("endpoint") or {}).items() if v}
+                try:
+                    if resolve_endpoint("probe", spec).get("auth") == "adc":
+                        # Vertex has no model listing; what breaks there is the credential
+                        # itself, so mint a token and say whose project it is
+                        from ..llm.provider import _adc_token
+                        tok = _adc_token()
+                        tok.token()
+                        self._json({"ok": True, "models": [],
+                                    "note": f"credentials work · project {spec.get('project') or tok.project}"})
+                        return
+                    pv = build_provider({"endpoints": {"probe": spec},
+                                         "roles": {"chat": {"model": "probe"}}})
+                    found = pv.list_models("chat")
+                    self._json({"ok": bool(found), "models": found[:200],
+                                "error": getattr(pv, "last_list_error", "")})
+                except Exception as exc:  # noqa: BLE001 - the panel reports it
+                    self._json({"ok": False, "models": [], "error": f"{type(exc).__name__}: {exc}"[:300]})
+            elif self.path == "/api/settings/test":
+                # the same probe `doctor` runs, from the panel that just changed the model
+                from ..llm.doctor import _PROBE_SYS, _PROBE_USER
+                role = body.get("role") or "chat"
+                pv = provider()
+                if pv is None:
+                    self._json({"ok": False, "error": "no provider configured"})
+                    return
+                t0 = time.monotonic()
+                try:
+                    pv.chat(_PROBE_SYS, _PROBE_USER, want_json=True, role=role)
+                    self._json({"ok": True, "seconds": round(time.monotonic() - t0, 1)})
+                except Exception as exc:  # noqa: BLE001 - the panel reports it
+                    self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"[:400]})
             elif self.path == "/api/rebuild":
                 if rebuild is None:
                     self._json({"error": "rebuild not available"}, 400)

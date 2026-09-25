@@ -8,12 +8,19 @@ from pathlib import Path
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {
-    "repo": {"path": ".", "rev_range": "HEAD~300..HEAD"},
+    # The product is the whole history, so the default is the whole history: a config that
+    # names only a repository analysed its last 300 commits and said so in one line nobody
+    # reads. `--rev` or [repo].rev_range still narrows it.
+    "repo": {"path": ".", "rev_range": "HEAD"},
     "db": {"path": "gitchronicle.db"},
-    "output": {"html": "graph.html", "json": "domains.json"},
-    # No vendor default: a knowledge base built against a provider the owner did not
-    # choose is worse than a clear error. `gitchronicle doctor` checks what is configured.
-    "providers": {},
+    "output": {"html": "graph.html", "json": "domains.json",
+               # a config with no [output] still has somewhere to put the knowledge base
+               "kb": "kb.db", "kb_dir": "kb"},
+    # No vendor default, and no endpoint of our own: a knowledge base built against a
+    # provider the owner did not choose is worse than a clear error. [endpoints] says where
+    # models live, [roles] says which one does which job — see `gitchronicle models`.
+    "endpoints": {},
+    "roles": {},
     "cluster": {
         "knn": 10,
         "edge_threshold": 0.12,
@@ -108,19 +115,37 @@ def _load_dotenv(path: str | Path = ".env") -> None:
         os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 
+# Set by the CLI's root callback (--model / --think). The overrides belong HERE rather than
+# in one command helper: `doctor` did not use that helper, so the flags it advertised did
+# nothing. Every entry point loads the config; nothing else is guaranteed to be on the path.
+OVERRIDES: dict[str, list] = {"model": [], "think": [], "endpoint": []}
+
+
 def load_config(path: str | Path = "config.toml") -> dict[str, Any]:
-    """Load config.toml (if present) merged over DEFAULTS; also load .env."""
-    _load_dotenv()
+    """Load config.toml (if present) merged over DEFAULTS; also load .env.
+
+    Then apply the overrides: the flags, and the environment (`GITCHRONICLE_<ROLE>_MODEL`,
+    `GITCHRONICLE_<ROLE>_THINK`) — the only channel a host has for a process it starts.
+    """
+    from .llm.provider import apply_overrides
+
     p = Path(path)
+    # the .env belongs beside the config it serves, not beside whatever directory the
+    # command was run from — a studio or an MCP server started elsewhere needs the keys too
+    _load_dotenv()
+    if p.parent != Path("."):
+        _load_dotenv(p.parent / ".env")
+    user: dict[str, Any] = {}
     if p.exists():
         with p.open("rb") as fh:
             user = tomllib.load(fh)
-        return _deep_merge(DEFAULTS, user)
-    return _deep_merge(DEFAULTS, {})
+    cfg = _deep_merge(DEFAULTS, user)
+    cfg["_overrides"] = apply_overrides(cfg)
+    return cfg
 
 
 def get(cfg: dict, dotted: str, default: Any = None) -> Any:
-    """Nested lookup: get(cfg, 'providers.chat.model')."""
+    """Nested lookup: get(cfg, 'roles.chat.model')."""
     cur: Any = cfg
     for part in dotted.split("."):
         if not isinstance(cur, dict) or part not in cur:

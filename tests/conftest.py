@@ -56,7 +56,7 @@ class FakeProvider:
         self.calls = []
         self.cache_only = False
         self.chat_cfg = {"model": "fake", "kind": "openai"}
-        self.chat_large_cfg = self.chat_cfg
+        self.answer_cfg = self.chat_cfg
         self.embed_cfg = None
         self.roles = {"chat": self.chat_cfg}
 

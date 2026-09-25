@@ -189,7 +189,7 @@ but three things measured on it were worth keeping:
 | territory in **current** names (renames resolved, cycle-guarded) | files split across two entries by a rename: **123 → 0**; 236 duplicate paths gone; answers unchanged (83% ± 6 vs 84% ± 5) |
 | giving an entry its files' **pre-rename** history | **rejected**: Wiki Manager "began" in 2024 as the old wiki builder (84% → 76%) |
 | untangle **newest-first**, written as it goes | the last month is queryable after ~4 min instead of after the whole run |
-| Gemini Flash **thinking off** (`thinking_budget = 0`) | untangle of 6.5k commits: **$30 → $7.51** and **~5 h → 30 min**; answers **91% ± 0**, the best measured |
+| Gemini Flash **thinking off** (`think = "off"`) | untangle of 6.5k commits: **$30 → $7.51** and **~5 h → 30 min**; answers **91% ± 0**, the best measured |
 
 The last row is a re-untangle from scratch, so it also measures the floor: a full first build
 of a 6,574-commit repository is about **$8 and half an hour**, narration included. Labels

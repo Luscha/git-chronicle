@@ -1,5 +1,15 @@
 # How gitchronicle works
 
+## The models are yours
+
+gitchronicle ships no endpoint, no key and no vendor. `[endpoints]` says where models live
+— a protocol (openai, anthropic, ollama: the only three that cost code), an address, an
+auth method — and `[roles]` says which endpoint and model does which job (chat, untangle,
+naming, narration, answer, judge; each falls back to `chat`). A `kind` is sugar for a row of
+data, so a new provider is config rather than a release, and a provider that speaks none of
+the three protocols belongs behind a LiteLLM or OpenRouter proxy. Thinking is one setting,
+translated per endpoint — it is billed as output and was 52% of all untangle tokens.
+
 ## The architecture: the tool proposes, the ledger decides
 
 Three earlier versions each hard-coded a **grain** — how big one "feature" is — and each

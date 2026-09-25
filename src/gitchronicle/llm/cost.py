@@ -15,7 +15,7 @@ dash, which is more useful than a confident wrong number.
 from __future__ import annotations
 
 _STAGE_ORDER = ["untangle", "naming", "narration", "distil", "ask", "eval", "chat",
-                "chat_large"]
+                "answer"]
 
 
 def _price(pricing: dict, model: str) -> tuple[float, float] | None:

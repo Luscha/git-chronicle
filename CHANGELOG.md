@@ -2,21 +2,42 @@
 
 ## Unreleased
 
-- **Scope view in the studio** — the repository as a tree, one verdict per subtree
-  (analysed / one entry / external), each row carrying the evidence attached to it. It
-  reports rules that do nothing, and setting a verdict makes it take effect rather than
-  being overridden by a broader include. Measured on the reference repository: marking one
-  vendored tree external dropped 2,897 of 17,720 concerns and took the eval from 82% to 90%.
-- **Review has a second half** — words that run through the work and name no entry, with
-  their sample labels and the folders they live in. A missing framework used to hide behind
-  one log line ("2,494 residue micro-clusters left unattributed").
-- **Files view, `gitchronicle inspect`, and an `inspect` MCP tool** — search a path, a
-  filename or a word; see every match with its owner, what it was built for, what changes
-  with it and which chapter tells it; select across entries and assign in one action. Where
-  the matches include each other it separates the framework from its users by edge
-  direction. Correcting a misfiled framework went from seven panels to one pass.
-- **`ignore <word>`** in the ledger, for vocabulary you have looked at and judged to name
-  nothing — the queue's equivalent of `keep-split`.
+### Models: bring your own, whichever it is
+
+- **Two tables instead of one enum.** `[endpoints.<name>]` is where models live — a
+  protocol (openai · anthropic · ollama, the only three that cost code), an address, and an
+  auth method (bearer · header:<name> · query:<name> · adc · none). `[roles.<role>]` says
+  which endpoint and model does which job. A vendor nobody here has heard of is four fields
+  in your own config, and `kind` is sugar for a row of data — never a branch.
+- **Five roles, not seven.** `embed` is gone (nothing in the pipeline embedded anything);
+  `chat_large` is now `answer`, which says what it is for. `chat` · `untangle` · `naming` ·
+  `narration` · `answer`, plus `judge` for grading with a model that did not answer.
+- **One thinking setting**, `think = "off" | <budget> | low|medium|high`, translated to what
+  each endpoint understands: `thinking_config` for Gemini/Vertex, `reasoning_effort` for
+  OpenAI's protocol, `thinking.budget_tokens` for Anthropic, `think: false` for Ollama. It
+  was writing a *Google* body to every OpenAI-compatible endpoint.
+- **`--model` / `--think` / `--endpoint ROLE=VALUE`** on every command, and the environment
+  for a process someone else launches: `GITCHRONICLE_<ROLE>_MODEL|THINK|ENDPOINT`, or
+  `GITCHRONICLE_KIND|BASE_URL|API_KEY|MODEL` for a whole configuration with **no config
+  file at all**. Applied in `load_config`, because the previous attempt wired them into one
+  helper that `doctor` did not use — it advertised the flags and ignored them.
+- **A key is never printed** — `doctor`, `models` and the studio show where it came from,
+  and a literal one as `set, not shown (…1234)`.
+- **`api_key = "file:/run/secrets/key"`** beside `env:VAR`, for hosts that mount secrets as
+  files. `gitchronicle models` prints endpoints, roles and what each resolves to;
+  `--available` asks an endpoint which models it can run. `doctor` reports each role's
+  model, thinking and credential *reference* — never the value.
+- **Studio → Models**, at the foot of the rail: connect an endpoint (provider picker, key or
+  GCP project, a test that asks the endpoint what it can run), then say which model does
+  which job. **A key typed there goes to the `.env` beside the config (0600)** and the config
+  keeps only `api_key = "env:NAME"` — refusing to take a key at all protected nothing on a
+  localhost tool and forced everyone into a text editor. The project's own
+  numbers moved from the rail to the Catalogue, where they are about something.
+- **A config that names only a repository analyses its whole history** (`rev_range` defaults
+  to `HEAD`, not the last 300 commits) and has a default knowledge-base path.
+
+### Curation and stories
+
 - **Files nobody owns that carry an entry's name** — a third review queue, and the gap the
   other two cannot see: the catalogue names the thing and holds none of its code, because a
   word several entries answer to identifies none of them. `char_affect.cpp`, in 135 commits,

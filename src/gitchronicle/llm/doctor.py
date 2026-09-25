@@ -1,20 +1,33 @@
-"""DOCTOR — check the setup before a long run pays for finding out.
+"""DOCTOR — is this setup going to work, and what will it cost you in time?
 
-A wrong model name, a missing permission or an endpoint that rejects JSON mode all fail
-the same way today: hours in, mid-untangle. Each check here is one cheap call, and each
-reports what to do about it. Discovered the hard way: Vertex rejects
-``reasoning_effort="none"``, and an endpoint that ignores ``response_format`` produces
-prose the parser then has to rescue.
+Everything here is a check somebody had to run by hand once: git, the repository, the
+scope map, and then the part that decides the bill — which endpoint answers which job,
+how much of it is reasoning, and where its credential comes from (the reference, never
+the value).
 """
 
 from __future__ import annotations
 
 import time
 
-from .provider import ROLES, LLMError, build_provider
+from .endpoints import ROLE_HELP, ROLES
+from .provider import LLMError, build_provider
 
 _PROBE_SYS = "You answer in JSON only."
-_PROBE_USER = 'Reply exactly {"ok": true} and nothing else.'
+_PROBE_USER = 'Reply with exactly: {"ok": true}'
+
+
+def _think_of(cfg: dict) -> str:
+    """What this role does about reasoning, and what that costs in wall-clock."""
+    if cfg.get("think_budget") is not None:
+        b = int(cfg["think_budget"])
+        return "thinking off" if b == 0 else f"thinking ≤{b}"
+    if cfg.get("think_effort"):
+        return f"thinking {cfg['think_effort']}"
+    return "thinking unlimited"
+
+
+from .endpoints import key_ref as _key_of
 
 
 def check_scope(log=print) -> int:
@@ -36,63 +49,52 @@ def check_scope(log=print) -> int:
 
 
 def check_providers(cfg: dict, log=print) -> dict:
-    providers = cfg.get("providers", {})
+    for line in cfg.get("_overrides") or []:
+        log(f"  override: {line}")
     try:
         pr = build_provider(cfg, None)          # no conn: probes are never cached
     except LLMError as exc:
-        log(f"  ✗ config: {exc}")
+        log(f"  ✗ models: {exc}")
         return {"ok": False, "roles": {}}
 
     seen: dict[tuple, str] = {}
     out: dict[str, dict] = {}
     ok_all = True
     for role in ROLES:
-        if role not in providers:
+        c = pr.roles.get(role)
+        if not c:
             continue
-        cfgr = pr.roles.get(role) or (pr.embed_cfg if role == "embed" else None)
-        if not cfgr:
+        where = f"{c.get('name', '?')} · {c.get('protocol')}/{c['model']}"
+        if c.get("inherited_from"):
+            log(f"  · {role}: follows {c['inherited_from']}")
             continue
-        ident = (cfgr.get("kind"), cfgr.get("base_url"), cfgr.get("model"))
+        ident = (c.get("base_url"), c.get("model"), c.get("think_budget"), c.get("think_effort"))
         if ident in seen:
-            log(f"  · {role}: same endpoint as {seen[ident]}")
+            log(f"  · {role}: same model as {seen[ident]}")
             continue
         seen[ident] = role
-        if role == "embed":
-            out[role] = _probe_embed(pr, log, role)
-        else:
-            out[role] = _probe_chat(pr, cfgr, log, role)
-        # embeddings are optional: nothing in the pipeline embeds, so a missing backend
-        # is a note, not a failure
-        ok_all = ok_all and (out[role]["ok"] or role == "embed")
-    for role in ("chat_large", "naming", "untangle", "narration", "judge"):
-        if role not in providers:
-            log(f"  · {role}: not set, falls back to "
-                f"{'chat_large' if role == 'judge' and 'chat_large' in providers else 'chat'}")
+        out[role] = _probe(pr, c, log, role, where)
+        ok_all = ok_all and out[role]["ok"]
     return {"ok": ok_all, "roles": out}
 
 
-def _probe_chat(pr, cfgr: dict, log, role: str) -> dict:
-    name = f"{cfgr.get('kind', 'openai')}/{cfgr.get('model')}"
+def _probe(pr, c: dict, log, role: str, where: str) -> dict:
     t0 = time.monotonic()
     try:
         r = pr.chat(_PROBE_SYS, _PROBE_USER, want_json=True, role=role)
     except Exception as exc:  # noqa: BLE001 - the point is to report it, not raise
-        log(f"  ✗ {role}: {name} — {type(exc).__name__}: {str(exc)[:160]}")
+        log(f"  ✗ {role}: {where} — {type(exc).__name__}: {str(exc)[:160]}")
         return {"ok": False, "error": str(exc)[:200]}
     dt = time.monotonic() - t0
     json_ok = isinstance(r, dict) and r.get("ok") is True
-    log(f"  {'✓' if json_ok else '~'} {role}: {name} answered in {dt:.1f}s"
+    log(f"  {'✓' if json_ok else '~'} {role}: {where} answered in {dt:.1f}s"
         + ("" if json_ok else "  (did not return the JSON asked for — set json_mode = false "
-                             "if the endpoint rejects response_format)"))
-    return {"ok": True, "json": json_ok, "seconds": round(dt, 2), "model": name}
-
-
-def _probe_embed(pr, log, role: str) -> dict:
-    try:
-        v = pr.embed(["gitchronicle probe"])
-    except Exception as exc:  # noqa: BLE001
-        log(f"  · embed (optional, legacy commands only) unreachable: "
-            f"{type(exc).__name__}: {str(exc)[:120]}")
-        return {"ok": False}
-    log(f"  ✓ embed: {pr.embed_cfg.get('model')} → {v.shape[1]} dimensions")
-    return {"ok": True, "dim": int(v.shape[1])}
+                              "if the endpoint rejects response_format)"))
+    think = _think_of(c)
+    # the probe prompt is tiny, so its latency hides what thinking does on a real call:
+    # answering went 13.4s -> 2.9s here, and it was one line of config
+    log(f"      {ROLE_HELP.get(role, '')} · {think} · key: {_key_of(c)}"
+        + (f"  — billed as output; `--think {role}=off` or a budget" if "unlimited" in think
+           else ""))
+    return {"ok": True, "json": json_ok, "seconds": round(dt, 2), "model": c["model"],
+            "think": think, "key": _key_of(c)}

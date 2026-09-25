@@ -315,6 +315,11 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     """Open the DB with sane pragmas for a resumable single-writer pipeline."""
     # check_same_thread=False + the provider's db_lock let concurrent untangle workers
     # share one connection safely (all access is serialised through the lock / main thread).
+    # a config copied into a fresh directory names build/work.db before build/ exists;
+    # the first command a newcomer runs should not be a sqlite traceback
+    parent = Path(str(db_path)).parent
+    if str(parent) not in ("", "."):
+        parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

@@ -265,7 +265,7 @@ def _repo_chronicle(conn, provider, log, force):
                 f"Sample commits:\n{sample}\n\nReturn "
                 '{"title":"...","narrative":"2-4 sentences"}')
         try:
-            r = provider.chat(REPO_SYS, user, want_json=True, large=True,
+            r = provider.chat(REPO_SYS, user, want_json=True, role="answer",
                               cache_extra=f"repo:{k}:{len(cs)}", stage="narration")
         except NotCached:
             raise

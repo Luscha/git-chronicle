@@ -30,7 +30,7 @@ SQLite file and one chat model.
 ## First run
 
 ```bash
-cp config.example.toml config.toml     # set [repo].path and one [providers.chat]
+cp config.example.toml config.toml     # set [repo].path, one [endpoints.*] and [roles.chat]
 gitchronicle doctor                    # checks git, the repo and every model role
 gitchronicle init                      # drafts the scope (what is the product); review it
 gitchronicle cost --estimate 6500      # what the first build will cost, before it runs
@@ -53,6 +53,7 @@ writes as it goes, so the last month is queryable minutes in.
 | `ask` | one question, answered with citations |
 | `mcp` | serve the knowledge base to coding agents (stdio) |
 | `doctor` | check git, the repository, the scope and every model role |
+| `models` | where models live and which does which job; `--available` asks the endpoint |
 | `cost` | what the runs cost, per stage; `--estimate N` before they run |
 | `eval` | grade the answers against facts you already know |
 | `ledger` | the curation file: draft one, or open it in `$EDITOR` |
@@ -203,28 +204,151 @@ entry owns a file and why it looks the way it does — worth calling before chan
 and `period` (what happened in a given year). They return evidence, not conclusions; the
 agent does its own reasoning.
 
-## Models
+## Models — the one thing you must configure
 
-Any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Together, llama.cpp, LM Studio),
-plus `kind = "ollama"`, `"anthropic"`, `"azure"` and `"vertex"` (Application Default
-Credentials, no API key). Roles let one job use a different model from another, and each
-falls back to `chat`, so a minimal config is four lines:
+Everything else in gitchronicle is deterministic. **This is the entry point**, and the tool
+brings no endpoint, no key and no vendor of its own. Two tables say everything: where models
+live, and which one does which job.
 
-| role | what it does | cost |
+```toml
+[endpoints.mine]                     # WHERE models live
+kind    = "openai"                   # sugar for an address — see the list below
+api_key = "env:OPENAI_API_KEY"       # or file:/run/secrets/key
+
+[roles.chat]                         # WHICH model does which job
+model   = "gpt-4o-mini"
+```
+
+That is a complete configuration: one endpoint, one model, every job. `gitchronicle models`
+prints what it resolved, `gitchronicle doctor` checks it answers.
+
+### Endpoints: any endpoint
+
+An endpoint is three things — a **protocol**, an **address**, and how to **authenticate**:
+
+```toml
+[endpoints.work]
+protocol = "openai"                  # openai | anthropic | ollama — the only three
+base_url = "https://api.groq.com/openai/v1"
+auth     = "bearer"                  # bearer | header:x-api-key | query:key | adc | none
+api_key  = "env:GROQ_API_KEY"
+dialect  = "openai"                  # how this endpoint spells "think less"
+```
+
+`kind` fills those in for an address we happen to know — **openai, gemini, vertex,
+anthropic, ollama, azure, groq, together, openrouter, scaleway, deepinfra, fireworks,
+mistral, xai, deepseek, llamacpp, lmstudio, vllm, litellm** — and it is *data, never a code
+path*. A vendor nobody here has heard of is the four fields above, written out; there is
+nothing to wait for and nothing to patch. For a provider that speaks no protocol in that
+list, point an endpoint at a **LiteLLM or OpenRouter proxy** — that is the OpenAI protocol,
+and it costs this project no maintenance at all.
+
+### Roles: five jobs, and they can each live somewhere else
+
+| role | what it does | how much it runs |
 |---|---|---|
-| `chat` | everything not named below | — |
+| `chat` | the default — every job that names no model of its own | — |
 | `untangle` | one call per commit: what changed and why | **the bulk of the bill** |
 | `naming` | the names in your catalogue | pin it: changing it renames everything |
-| `narration` | the stories | modest |
-| `chat_large` / `judge` | answering questions, grading | a few calls |
+| `narration` | the stories (`update --chronicle`, studio → Stories) | modest |
+| `answer` | answering questions: `ask`, and the studio | a few calls, the slow ones |
+| `judge` | grading in `eval` — worth a *different* model from the one that answered | only when you evaluate |
 
-Two things worth knowing:
+Each falls back (`untangle`/`naming`/`narration`/`answer` → `chat`; `judge` → `answer`), so
+you add a role only when you want that job to differ. A local model for the thousands of
+untangle calls and a frontier model for the handful of answers is a normal setup, and it is
+stated once per endpoint rather than once per role:
 
-- **Turn thinking off for untangle.** It was 52% of all tokens on Gemini Flash and bought
-  nothing the eval could see: `thinking_budget = 0` (Gemini) or `reasoning_effort` (others).
-  On 6,574 commits: $30 → $7.51, and ~5 h → 30 min.
-- **Anything else your endpoint accepts** goes through `headers`, `query` and `params`,
-  without waiting for a release.
+```toml
+[endpoints.local]
+kind = "ollama"
+
+[endpoints.work]
+kind    = "openai"
+api_key = "env:OPENAI_API_KEY"
+
+[roles.chat]
+endpoint = "work"
+model    = "gpt-4o-mini"
+
+[roles.untangle]
+endpoint = "local"
+model    = "qwen2.5-coder:14b"
+think    = "off"
+```
+
+### Thinking: one setting, every vendor's spelling
+
+```toml
+think = "off"        # or a token budget (128, 1024), or "low" | "medium" | "high"
+```
+
+gitchronicle writes what *that* endpoint understands — a `thinking_config` budget for
+Gemini and Vertex, `reasoning_effort` for OpenAI and everything speaking its protocol,
+`thinking.budget_tokens` for Anthropic, `think: false` for Ollama. Reasoning is billed as
+**output** and is most of the wait:
+
+| | latency of one answer |
+|---|---|
+| `gemini-2.5-pro`, thinking as it comes | 13.4 s |
+| `gemini-2.5-pro`, `think = 128` | 5.1 s |
+| `gemini-2.5-flash`, `think = "off"` | 2.9 s |
+
+and on the pipeline it was **52% of all untangle tokens** for nothing the eval could see:
+6,574 commits went from $30 and ~5 h to **$7.51 and 30 min**. Some models refuse to be
+silenced entirely (`gemini-2.5-pro` rejects `off`); cap them instead.
+
+### Without touching a file
+
+```bash
+gitchronicle --model answer=gpt-4o-mini --think answer=off ask "when did X ship?"
+gitchronicle --endpoint untangle=local --model untangle=qwen2.5-coder:14b update
+
+# no config file at all — enough for a CI job or an agent host
+GITCHRONICLE_KIND=openai GITCHRONICLE_API_KEY=sk-… GITCHRONICLE_MODEL=gpt-4o-mini \
+  gitchronicle update
+```
+
+`--model`, `--think` and `--endpoint` take `ROLE=VALUE`, are repeatable, and work on every
+command. The environment equivalents are `GITCHRONICLE_<ROLE>_MODEL|THINK|ENDPOINT`, plus
+`GITCHRONICLE_KIND|BASE_URL|API_KEY|MODEL` for a whole configuration with no file.
+**MCP needs no model at all** — the server is read-only SQL over the knowledge base, so an
+agent host mounts no credentials to run it.
+
+### Credentials
+
+| written as | means |
+|---|---|
+| `"sk-…"` | the key itself, in the file |
+| `"env:OPENAI_API_KEY"` | read from the environment, or a `.env` beside your config, at startup |
+| `"file:/run/secrets/openai"` | read from a file — docker/k8s secrets, agent hosts |
+
+`auth = "adc"` uses Google Application Default Credentials and takes no key — the studio
+asks for a GCP project instead, and its test mints a token rather than listing models.
+
+Nothing here ever logs or caches a key: `doctor`, `models` and the studio show where it came
+from (`env:OPENAI_API_KEY`), and a key given literally is shown as `set, not shown (…1234)`.
+**A key you type in the studio is written to the `.env` beside your config** (mode 0600,
+already git-ignored, already loaded) and the config file keeps only
+`api_key = "env:NAME"` — so the config stays safe to share or commit.
+
+### In the studio
+
+**Models**, at the foot of the rail, is the whole setup in two steps, and needs no text
+editor:
+
+1. **Connect an endpoint** — pick a provider (the address fills itself in), paste a key or
+   give a GCP project, and press **test**: it asks the endpoint what models it can run, or
+   mints an ADC token, and tells you what came back.
+2. **Say which model does which job** — each role picks an endpoint and a model from that
+   list, with its thinking setting and its own test button.
+
+Saving writes `[endpoints]` and `[roles]` into your config file line by line — comments and
+every other section untouched — and the key into the `.env` beside it. The next question
+uses it without a restart.
+
+- **Anything else your endpoint accepts** goes through `headers`, `query` and `params` in
+  the endpoint block, without waiting for a release.
 
 ## Checking the answers
 
