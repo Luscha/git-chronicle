@@ -1,11 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 96" width="520" height="96" role="img" aria-label="gitchronicle">
   <style>
-    .word { fill: #16181d }
-    .tag  { fill: #6b7280 }
-    @media (prefers-color-scheme: dark) {
-      .word { fill: #f2f4f8 }
-      .tag  { fill: #9aa3b2 }
-    }
+    .word { fill: #f2f4f8 }
+    .tag  { fill: #9aa3b2 }
   </style>
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">

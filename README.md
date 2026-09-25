@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/img/logo-wide.svg" alt="gitchronicle" width="480">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/logo-wide-dark.svg">
+    <img src="docs/img/logo-wide.svg" alt="gitchronicle" width="480">
+  </picture>
 </p>
 
 **Turn a git repository into a knowledge base that answers questions about itself.** Not
